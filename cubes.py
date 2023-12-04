@@ -67,85 +67,52 @@ for cube_enc,cube_rotations in rotation_table.items():
 maximum_cube_rotation_indices = {}
 for cube_enc,max_value in maximum_rotated_cube_values.items():
 	maximum_cube_rotation_indices[cube_enc] = []
-	# not sure why enumerate(rotations) doesn't work here
 	for i,rotation in enumerate(rotations):
 		if rotate_value(cube_enc, rotation) == max_value:
 			maximum_cube_rotation_indices[cube_enc].append(i)
-	#i = 0
-	#for rotation in enumerate(rotations):
-	#	if rotate_value(cube_enc, rotation) == max_value:
-	#		maximum_cube_rotation_indices[cube_enc].append(i)
-	#	i += 1
 
 # count of unique polycubes of size n
 n_counts = [0 for i in range(22)]
 
 class Cube:
-	# integer encoding for this cube's neighbors:
-	# 6 bits per cube, where a 1 represents a present neighbor in that direction
-	enc = 0
-	# references to neighbor Cube instances
-	#neighbors = [None, None, None, None, None, None]
-	neighbors = None
-	# position in the polycube defined as (x + 100y + 10,000z)
-	pos	= 0
-	# used when encoding a polycube
-	temp = 0
-	# for debugging
-	coords = None
 
 	def __init__(self, *, pos):
+		# position in the polycube defined as (x + 100y + 10,000z)
 		self.pos = pos
+		# references to neighbor Cube instances
 		self.neighbors = [None, None, None, None, None, None]
-		self.temp = 0
+		# integer encoding for this cube's neighbors:
+		# 6 bits per cube, where a 1 represents a present neighbor in that direction
 		self.enc = 0
-		self.coords = {'x':0, 'y':0, 'z':0}
 
 	def copy(self):
 		new_cube = Cube(pos=self.pos)
 		new_cube.enc = self.enc
 		new_cube.neighbors = self.neighbors.copy()
-		new_cube.temp = self.temp
-		new_cube.coords = self.coords.copy()
 		return new_cube
 
 class Polycube:
 
-	# number of cubes in this polycube
-	n = 0
-	#enc = None
-	# positions of cubes in this polycube
-	cubes = {}
-	# used when encoding this polycube
-	temp = 0
-
-	canonical_info = None
-
 	# initialize with 1 cube at (0, 0, 0)
 	def __init__(self, create_initial_cube):
 		self.canonical_info = None
+		# number of cubes in this polycube
+		self.n = 0
+		# positions of cubes in this polycube
+		self.cubes = {}
 		if create_initial_cube:
 			self.n = 1
 			self.cubes[0] = Cube(pos=0)
-		else:
-			self.n = 0
-			self.cubes = {}
 
 	def copy(self):
 		new_polycube = Polycube(create_initial_cube=False)
 		new_polycube.n = self.n
-		#new_polycube.cubes = self.cubes.copy()
 		new_polycube.cubes = {}
 		for pos,cube in self.cubes.items():
 			new_polycube.cubes[pos] = cube.copy()
 		# thanks to https://stackoverflow.com/a/15214597/259456
 		new_polycube.canonical_info = deepcopy(self.canonical_info)
 		return new_polycube
-
-	# where enc is an encoding of the polycube with
-	#   6 bits per cube
-	#def __init__(self, *, enc):
-	#	self.enc = enc
 
 	def add(self, *, pos):
 		global directions
@@ -177,19 +144,10 @@ class Polycube:
 			#   implementation used addition here)
 			#new_cube.enc += (1 << (5-direction))
 			new_cube.enc |= (1 << (5-direction))
-			#if new_cube.enc > 63:
-			#	pass
-			#if new_cube.enc < 0:
-			#	pass
 			# use XOR to flip between each direction and its opposite
 			#   to set the neighbor's neighbor to the new cube
 			#   (0<->1, 2<->3, 4<->5)
 			dir_cube.neighbors[direction ^ 1] = new_cube
-			#if False:
-			#	dir_cube_enc_prev = dir_cube.enc
-			#	flipped_dir = direction ^ 1
-			#	to_add_to_enc = 1 << flipped_dir
-			#	dir_cube_enc_new = dir_cube_enc_prev + to_add_to_enc
 			# we use rotation of [0,1,2,3,4,5] where the '0'
 			#   direction is -x and is the most significant bit
 			#   in each cube's .enc value, so we need '0' to
@@ -199,10 +157,6 @@ class Polycube:
 			#   implementation used addition here)
 			#dir_cube.enc += (1 << ((5-direction) ^ 1))
 			dir_cube.enc |= (1 << ((5-direction) ^ 1))
-			#if dir_cube.enc > 63:
-			#	pass
-			#if dir_cube.enc < 0:
-			#	pass
 
 	def remove(self, *, pos):
 		# remove this cube from each of its neighbors
@@ -210,8 +164,6 @@ class Polycube:
 			if neighbor is None:
 				continue
 			neighbor_enc_orig = neighbor.enc
-			#if neighbor_enc_orig == 0:
-			#	pass
 			# i'm doing something wrong so i'll just use pos
 			#   to look up the neighbor cube instance that way
 			#neighbor.neighbors[dir ^ 1] = None
@@ -225,101 +177,24 @@ class Polycube:
 			#         new .enc value into self.cubes[<neighbor pos>].enc
 			#neighbor.enc -= (1 << ((5-dir) ^ 1))
 			self.cubes[neighbor.pos].enc -= (1 << ((5-dir) ^ 1))
-			#if neighbor.enc < 0:
-			#	pass
 		del self.cubes[pos]
 		self.n -= 1
 		self.canonical_info = None
-
-	#def add_temporary(self, *, pos):
-	#	# TODO: what are the type(s) of self.canonical_info? and is .copy() needed?
-	#	canonical_info = self.canonical_info.copy()
-	#	self.add(pos=pos)
 
 	# for each cube, find its maximum value after a would-be rotation,
 	#   and return the sorted list of those values
 	def find_maximum_cube_values(self):
 		global maximum_rotated_cube_values
 		return sorted([maximum_rotated_cube_values[cube.enc] for cube in self.cubes.values()])
-		#max_cube_rotated_value = 0
-		#for cube in self.cubes.values():
-		#	max_cube_rotated_value = max(maximum_rotated_cube_values[cube.enc], max_cube_rotated_value)
-		#return max_cube_rotated_value
-
-	# for the given start cube and rotation, find the encoding of the polycube
-	def make_encoding_orig(self, *, start_cube, rotations_index):
-		global rotations
-		rotation = rotations[rotations_index]
-		# cubes are added to this list in the same order as specified by the rotation
-		encoded_cubes = [start_cube]
-		self.temp += 1
-		start_cube.tmp = self.temp
-		i = 0
-		while len(encoded_cubes) < self.n:
-			for j in rotation:
-				neighbor = encoded_cubes[i].neighbors[j]
-				if neighbor is None or neighbor.temp == self.temp:
-					continue
-				neighbor.tmp = self.temp
-				encoded_cubes.append(neighbor)
-			i += 1
-		# create single encoded int using only the first i cubes
-		#   (since cubes are not explicitly in the encoding list
-		#   if they are fully specified by a previous cube)
-		encoding = self.ordered_cubes_to_int(ordered_cubes=encoded_cubes[0:i], rotations_index=rotations_index)
-		# return the encoding and the position of the last cube
-		#   in the encoding order
-		#return (encoding, encoded_cubes[self.n - 1].pos)
-		return (encoding, encoded_cubes[-1].pos)
-
-	# for the given start cube and rotation, find the encoding of the polycube
-	def make_encoding_unfinished(self, *, start_cube, rotations_index):
-		global rotations
-		rotation = rotations[rotations_index]
-		# cubes are added to this list in the same order as specified by the rotation
-		encoded_cubes = [start_cube]
-		included_cube_pos = set()
-		included_cube_pos.add(start_cube.pos)
-		encoding = rotationTable[start_cube.enc][rotations_index]
-		# use cursor moving from left (most significant bit) to right (least significant bit)
-		cursor = 5
-		cursor_cube = start_cube
-		while len(included_cube_pos) < self.n:
-			# by the time the cursor reaches the far right (least significant bit)
-			#   of the encoding, we should already have all cubes represented
-			#   in the encoding, so this if check should never happen
-			if cursor < 0:
-				pass
-			# advance the cursor if the encoding has a 0 bit at the cursor
-			if encoding & (1 << cursor) == 0:
-				cursor -= 1
-				continue
-			# the 5th bit from the left corresponds to the 0th item in the rotation array
-			rot_dir = rotation[cursor - 5]
-			neighbor = cursor_cube.neighbors[rot_dir]
-			# since the cube's enc has a 1 bit in the rotated direction,
-			#   there should be a neighbor there!
-			if neighbor is None:
-				pass
-			included_cube_pos.add(neighbor.pos)
-			# if the neighbor itself has neighbor(s)
-			cursor -= 1
 
 	def truncate_redundant_cubes(self, *, ordered_cubes, rotation):
 		# for now, don't truncate anything
 		return ordered_cubes
 
 	def make_encoding_recursive(self, *, start_cube_pos, rotation, included_cube_pos):
-		#if depth > 50:
-		#	pass
 		ordered_cubes = [self.cubes[start_cube_pos]]
 		included_cube_pos.add(start_cube_pos)
-		#if not start_cube.pos in included_cube_pos:
-			#ordered_cubes.append(start_cube)
-			#included_cube_pos.add(start_cube.pos)
 		for direction in rotation:
-			#if len(included_cube_pos) == self.n:
-			#	break
 			neighbor = self.cubes[start_cube_pos].neighbors[direction]
 			if neighbor is None or neighbor.pos in included_cube_pos:
 				continue
@@ -330,8 +205,6 @@ class Polycube:
 		global rotations
 		# uses a recursive depth-first encoding of all cubes, using
 		#   the provided rotation's order to traverse the cubes
-		# TODO: return only an "ordered cubes" list, and include all
-		#         cubes in it
 		ordered_cubes = self.make_encoding_recursive( \
 			start_cube_pos=start_cube_pos, \
 			rotation=rotations[rotations_index], \
@@ -340,30 +213,27 @@ class Polycube:
 		# TODO: going in rotation-order, create the int encoding
 		#         and stop as soon as we've processed enough cubes
 		#         to have at least one '1' bit for each cube in
-		#         the polycube
+		#         the polycube (but this doesn't actually seem
+		#         necesary... may be faster to just not do this)
 		encoding_cubes = self.truncate_redundant_cubes(ordered_cubes=ordered_cubes, rotation=rotations[rotations_index])
 		encoding = self.ordered_cubes_to_int(ordered_cubes=encoding_cubes, rotations_index=rotations_index)
 		# return the encoding and the position of the last cube
 		#   in the encoding order
-		#return (encoding, encoded_cubes[self.n - 1].pos)
-		#return (encoding, encoded_cubes[-1].pos)
-		encoding_and_last_pos = (encoding, ordered_cubes[-1].pos)
+		#encoding_and_last_pos = (encoding, ordered_cubes[-1].pos)
 		#print(f'for {self.n=}, encoding: {int_to_bit_list_unbound(encoding_and_last_pos[0])}')
-		return encoding_and_last_pos
+		return (encoding, ordered_cubes[-1].pos)
 
 	def ordered_cubes_to_int(self, *, ordered_cubes, rotations_index):
 		global rotation_table
 		encoding = 0
 		for i,cube in enumerate(ordered_cubes):
 			encoding = encoding << 6
-			#encoding += (rotation_table[cube.enc][rotations_index] << (6 * i))
 			encoding += rotation_table[cube.enc][rotations_index]
 		return encoding
 
 	def are_canonical_infos_equal(self, a, b):
 		# we can just compare the encoded int values, so we don't
 		#   need to compare the rest of the canonical info
-		#return a[0] == b[0] and a[1] == b[1] and a[2] == b[2]
 		return a[0] == b[0]
 
 	def find_canonical_info(self):
@@ -397,20 +267,12 @@ class Polycube:
 		# since this is a valid polycube, increment the count
 		n_counts[self.n] += 1
 
-		#if False and self.n == 4: # debug printing
-		#	print(f"counting new polycube w {self.n=}")
-		#	for cube in self.cubes.values():
-		#		print(f"  {cube.coords=}")
-
 		# we are done if we've reached the desired n,
 		#   which we need to stop at because we are doing
 		#   a depth-first recursive evaluation
 		if self.n == limit_n:
 			return
 		# keep a Set of all evaluated positions so we don't repeat them
-		#   TODO: can we initialize this with the contents of self.cubes
-		#           and skip the "or try_pos in self.cubes" check below?
-		#tried_pos = set()
 		tried_pos = set(self.cubes.keys())
 
 		tried_canonicals = []
@@ -424,7 +286,6 @@ class Polycube:
 		for cube in self.cubes.values():
 			for direction_cost in direction_costs:
 				try_pos = cube.pos + direction_cost
-				#if try_pos in tried_pos or try_pos in self.cubes:
 				if try_pos in tried_pos:
 					continue
 				tried_pos.add(try_pos)
@@ -432,26 +293,6 @@ class Polycube:
 				# create p+1
 				tmp_add = self.copy()
 				tmp_add.add(pos=try_pos)
-
-				#if False: # debug print coords of all cubes
-				#	tmp_add.cubes[try_pos].coords = self.cubes[cube.pos].coords.copy()
-				#	if direction_cost == -1:
-				#		tmp_add.cubes[try_pos].coords['x'] -= 1
-				#	elif direction_cost == 1:
-				#		tmp_add.cubes[try_pos].coords['x'] += 1
-				#	elif direction_cost == -100:
-				#		tmp_add.cubes[try_pos].coords['y'] -= 1
-				#	elif direction_cost == 100:
-				#		tmp_add.cubes[try_pos].coords['y'] += 1
-				#	elif direction_cost == -10_000:
-				#		tmp_add.cubes[try_pos].coords['z'] -= 1
-				#	elif direction_cost == 10_000:
-				#		tmp_add.cubes[try_pos].coords['z'] += 1
-				#	else:
-				#		print("what?")
-				#		sys.exit(1)
-				#	if any([abs(cube.coords['x']) == 1 and abs(cube.coords['y']) == 1 and cube.coords['z'] == 0 for cube in tmp_add.cubes.values()]):
-				#		pass
 
 				# skip if we've already seen some p+1 with the same canonical representation
 				#   (comparing the bitwise int only)
@@ -468,8 +309,7 @@ class Polycube:
 
 				# remove the last of the ordered cubes in p+1
 				tmp_remove = tmp_add.copy()
-				#if tmp_remove.n == 4:
-				#	pass
+
 				# enumerate the set of "last cubes", and grab one, where
 				#   enumerate.__next__() returns a tuple of (index, value)
 				#   and thus we need to use the 1th element of the tuple
@@ -479,9 +319,6 @@ class Polycube:
 				canonical_try_removed = tmp_remove.find_canonical_info()
 				if self.are_canonical_infos_equal(canonical_try_removed, canonical_orig):
 					tmp_add.extend(limit_n=limit_n)
-				#else:
-				#	# just here for debugging stepping purposes
-				#	pass
 
 last_interrupt_time = 0
 
@@ -493,7 +330,6 @@ def interrupt_handler(sig, frame):
 		do_halt = True
 	else:
 		last_interrupt_time = now
-		#print('\nresults so far:')
 		print_results()
 	if do_halt:
 		print('\nstopping...')
@@ -507,54 +343,11 @@ def print_results():
 			print(f'n = {n:>2}: {v}')
 
 if __name__ == "__main__":
-
-	# test placing three cubes in a row, and see if the middle cube is
-	#   erroneously listed as the "last" cube in the encoding
-	#a = Polycube(create_initial_cube=True)
-	#a.add(pos=1)
-	#a.add(pos=-1)
-	#canonical_a = a.find_canonical_info()
-
-	# test that different 3-cube "L" shapes have the same canonical encoding
-	b = Polycube(create_initial_cube=False)
-	b.add(pos=0)
-	b.add(pos=-1)
-	b.add(pos=-100)
-	b_enc = b.find_canonical_info()
-	c = Polycube(create_initial_cube=False)
-	c.add(pos=-1)
-	c.add(pos=-100)
-	c.add(pos=-101)
-	c_enc = c.find_canonical_info()
-	d = Polycube(create_initial_cube=False)
-	d.add(pos=1)
-	d.add(pos=100)
-	d.add(pos=101)
-	d_enc = d.find_canonical_info()
-	e = Polycube(create_initial_cube=False)
-	e.add(pos=0)
-	e.add(pos=100)
-	e.add(pos=101)
-	e_enc = e.find_canonical_info()
-	if b_enc[0] == c_enc[0] and b_enc[0] == d_enc[0] and b_enc[0] == e_enc[0]:
-		pass
-	else:
-		print("two different 3-cube 'L' shapes should have the same canonical encoding", file=sys.stderr)
-		sys.exit(1)
-
 	signal.signal(signal.SIGINT, interrupt_handler)
-	print("use Ctrl+C once to print current results, or twice to stop")
+	print("use Ctrl+C once to print current results, or twice to stop\n")
 	start_time = time.perf_counter()
-	# enumerate all valid polycubes of size n
 	p = Polycube(create_initial_cube=True)
-	# i guess we'll use recursion for this first attempt at this:
-	# - we'll extend each "minimal" polycube found at each n level
-	# - this avoid having to save anything in memory
-	# - a drawback is that each "minimal" polycube to count must
-	#     do a list lookup to increment the counter
+	# enumerate all valid polycubes up to size limit_n
 	p.extend(limit_n=4 if len(sys.argv) < 2 else int(sys.argv[1]))
 	print_results()
-	#for i in range(100):
-	#	time.sleep(1)
-	#	print(f"boop {i}")
-	print(f'elapsed seconds: {time.perf_counter() - start_time}');
+	print(f'elapsed seconds: {time.perf_counter() - start_time}')
