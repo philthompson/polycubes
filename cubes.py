@@ -5,9 +5,10 @@ import concurrent.futures
 from copy import deepcopy
 from functools import reduce
 from multiprocessing import Array as ConcurrentArray
+from queue import SimpleQueue, Empty
 import signal
 import sys
-from threading import RLock
+#from threading import RLock
 import time
 
 def int_to_bit_list_unbound(n):
@@ -80,6 +81,8 @@ n_counts = [0 for i in range(22)]
 # global stuff accessible by threads
 lock = None
 global_pool_executor = None
+new_seen_canonical_polycubes = SimpleQueue()
+outstanding_thread_queue = SimpleQueue()
 last_count_increment_time = None
 outstanding_thread_count = 0
 
@@ -100,47 +103,32 @@ class Cube:
 		new_cube.neighbors = self.neighbors.copy()
 		return new_cube
 
-# TODO: use queues or something to avoid waiting for the lock
-def extend_with_thread_pool_callback(future):
-	global n_counts
-	global global_pool_executor
-	global last_count_increment_time
-	global outstanding_thread_count
-	polycubes, limit_n = future.result()
-	with lock:
-		for polycube_n in polycubes:
-			# since this is a valid polycube, increment the count
-			n_counts[polycube_n] += 1
-		last_count_increment_time = time.perf_counter()
-		outstanding_thread_count -= 1
-
 # the function each thread will run
 def extend_with_thread_pool(*, polycube, limit_n):
 	global direction_costs
 	global global_pool_executor
-	global lock
-	global outstanding_thread_count
+	global new_seen_canonical_polycubes
+	global outstanding_thread_queue
 
 	# we are done if we've reached the desired n,
 	#   which we need to stop at because we are doing
 	#   a depth-first recursive evaluation
 	if polycube.n == limit_n:
-		return ([],limit_n)
+		# since we're done, decrement the count of outstanding threads
+		outstanding_thread_queue.get()
+		return
+
 	# keep a Set of all evaluated positions so we don't repeat them
 	tried_pos = set(polycube.cubes.keys())
 
 	tried_canonicals = []
-
 	canonical_orig = polycube.find_canonical_info()
-
 	tmp_add = polycube.copy()
 
 	# faster to declare a variable here, ahead of the loop?
 	#   or can the varaible just be declared and used inside the loop?
 	try_pos = 0
-	# any found polycubes of size polycube.n+1 that have a canonical
-	#   encoding -- the ones to continue recursion into
-	canonical_larger_polycubes = []
+
 	# for each cube, for each direction, add a cube
 	for cube in polycube.cubes.values():
 		for direction_cost in direction_costs:
@@ -182,13 +170,11 @@ def extend_with_thread_pool(*, polycube, limit_n):
 			if tmp_add.find_canonical_info()[0] == canonical_orig[0]:
 				# replace the least significant cube we just removed
 				tmp_add.add(pos=least_significant_cube_pos)
-				# make a copy here for counting cubes and continuing recursion upon
-				canonical_larger_polycubes.append(tmp_add.n)
-				# TODO: use queues or something to avoid waiting for the lock
-				with lock:
-					outstanding_thread_count += 1
-					submitted_future = global_pool_executor.submit(extend_with_thread_pool, polycube=tmp_add.copy(), limit_n=limit_n)
-					submitted_future.add_done_callback(extend_with_thread_pool_callback)
+				# allow the found polycube to be counted elsewhere
+				new_seen_canonical_polycubes.put(tmp_add.n)
+				# track that we have a new submission to the thread pool
+				outstanding_thread_queue.put(0)
+				global_pool_executor.submit(extend_with_thread_pool, polycube=tmp_add.copy(), limit_n=limit_n)
 				# revert creating p+1 to try adding a cube at another position
 				tmp_add.remove(pos=try_pos)
 
@@ -209,7 +195,9 @@ def extend_with_thread_pool(*, polycube, limit_n):
 			else:
 				print('yikes')
 				sys.exit(1)
-	return (canonical_larger_polycubes, limit_n)
+	# since we're done, decrement the count of outstanding threads
+	outstanding_thread_queue.get()
+	return
 
 class Polycube:
 
@@ -469,19 +457,18 @@ class Polycube:
 					sys.exit(1)
 
 	def extend(self, *, limit_n):
-		global lock
+		#global lock
 		global global_pool_executor
 		global n_counts
-		global outstanding_thread_count
+		global outstanding_thread_queue
 		# use the concurrent version of this function if we have a pool_executor
 		if global_pool_executor is None:
 			self.extend_single_thread(limit_n=limit_n)
 		else:
-			lock = RLock()
+			#lock = RLock()
 			n_counts[self.n] += 1
-			outstanding_thread_count += 1
-			future = global_pool_executor.submit(extend_with_thread_pool, polycube=self, limit_n=limit_n)
-			future.add_done_callback(extend_with_thread_pool_callback)
+			outstanding_thread_queue.put(0)
+			global_pool_executor.submit(extend_with_thread_pool, polycube=self, limit_n=limit_n)
 
 last_interrupt_time = 0
 
@@ -500,7 +487,7 @@ def interrupt_handler(sig, frame):
 
 def print_results():
 	global n_counts
-	print('\n\nresults:')
+	print(f'\n\nresults: (queue size: {outstanding_thread_queue.qsize()})')
 	for n,v in enumerate(n_counts):
 		if n > 0 and v > 0:
 			print(f'n = {n:>2}: {v}')
@@ -512,6 +499,7 @@ if __name__ == "__main__":
 	signal.signal(signal.SIGINT, interrupt_handler)
 	print("use Ctrl+C once to print current results, or twice to stop\n")
 	start_time = time.perf_counter()
+	sleep_inc = 0.1
 	if sys.argv[1] == '0':
 		p = Polycube(create_initial_cube=True)
 		# enumerate all valid polycubes up to size limit_n
@@ -523,10 +511,26 @@ if __name__ == "__main__":
 			# enumerate all valid polycubes up to size limit_n
 			p.extend(limit_n=4 if len(sys.argv) < 3 else int(sys.argv[2]))
 			time.sleep(1.0)
-			# assume we don't need the lock to read this value?
-			while outstanding_thread_count > 0:
-				time.sleep(1.0)
+			while not outstanding_thread_queue.empty():
+				time.sleep(sleep_inc)
+				last_count_increment_time = time.perf_counter()
+				try:
+					while not new_seen_canonical_polycubes.empty():
+						n_counts[new_seen_canonical_polycubes.get()] += 1
+				except Empty:
+					pass
+			# we reach this point when we are done, so do one
+			#   final check of the counts queue
+			try:
+				while not new_seen_canonical_polycubes.empty():
+					n_counts[new_seen_canonical_polycubes.get()] += 1
+			except Empty:
+				pass
 	print_results()
 	if last_count_increment_time is None:
 		last_count_increment_time = time.perf_counter()
-	print(f'elapsed seconds: {last_count_increment_time - start_time}')
+	if sys.argv[1] == '0':
+		print(f'elapsed seconds: {last_count_increment_time - start_time}')
+	else:
+		precis_factor = 1.0 / sleep_inc
+		print(f'elapsed seconds: {round(precis_factor * (last_count_increment_time - start_time)) / precis_factor}')
