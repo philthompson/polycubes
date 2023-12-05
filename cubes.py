@@ -416,6 +416,8 @@ class Polycube:
 
 		canonical_orig = self.find_canonical_info()
 
+		tmp_add = self.copy()
+
 		# faster to declare a variable here, ahead of the loop?
 		#   or can the varaible just be declared and used inside the loop?
 		try_pos = 0
@@ -428,13 +430,13 @@ class Polycube:
 				tried_pos.add(try_pos)
 
 				# create p+1
-				tmp_add = self.copy()
 				tmp_add.add(pos=try_pos)
 
 				# skip if we've already seen some p+1 with the same canonical representation
 				#   (comparing the bitwise int only)
 				canonical_try = tmp_add.find_canonical_info()
 				if any(canonical_try[0] == tried_canonical[0] for tried_canonical in tried_canonicals):
+					tmp_add.remove(pos=try_pos)
 					continue
 
 				tried_canonicals.append(canonical_try)
@@ -442,21 +444,46 @@ class Polycube:
 				# this seems to never run, so commenting this out for now
 				#if try_pos in canonical_try[2]:
 				#	print("we are doing the thing")
-				#	tmp_add.extend_single_thread(limit_n=limit_n)
+				#	tmp_add.copy().extend_single_thread(limit_n=limit_n)
+				#	# revert creating p+1 to try adding a cube at another position
+				#	tmp_add.remove(pos=try_pos)
 				#	continue
 
 				# remove the last of the ordered cubes in p+1
-				tmp_remove = tmp_add.copy()
+				least_significant_cube_pos = enumerate(canonical_try[1]).__next__()[1]
 
 				# enumerate the set of "last cubes", and grab one, where
 				#   enumerate.__next__() returns a tuple of (index, value)
 				#   and thus we need to use the 1th element of the tuple
-				tmp_remove.remove(pos=enumerate(canonical_try[1]).__next__()[1])
+				tmp_add.remove(pos=least_significant_cube_pos)
+
 				# if p+1-1 has the same canonical representation as p, count it as a new unique polycube
 				#   and continue recursion into that p+1
-				canonical_try_removed = tmp_remove.find_canonical_info()
-				if self.are_canonical_infos_equal(canonical_try_removed, canonical_orig):
-					tmp_add.extend_single_thread(limit_n=limit_n)
+				if tmp_add.find_canonical_info()[0] == canonical_orig[0]:
+					# replace the least significant cube we just removed
+					tmp_add.add(pos=least_significant_cube_pos)
+					# make a copy here for continuing recursion upon
+					tmp_add.copy().extend_single_thread(limit_n=limit_n)
+					# revert creating p+1 to try adding a cube at another position
+					tmp_add.remove(pos=try_pos)
+
+				# undo the temporary removal of the least significant cube,
+				#   but only if it's not the same as the cube we just tried
+				#   since we remove that one before going to the next iteration
+				#   of the loop
+				elif least_significant_cube_pos != try_pos:
+					tmp_add.add(pos=least_significant_cube_pos)
+					# revert creating p+1 to try adding a cube at another position
+					tmp_add.remove(pos=try_pos)
+
+				# if we are not traversing the polycube, and we've already
+				#   removed the cube we just added, then we don't need it
+				#   before going on to the next iteration of the loop
+				elif least_significant_cube_pos == try_pos:
+					pass
+				else:
+					print('yikes')
+					sys.exit(1)
 
 	def extend(self, *, limit_n):
 		global lock
