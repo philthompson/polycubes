@@ -104,7 +104,7 @@ def try_extending_at_pos(*, cube_pos, sm_key, canonical_orig):
 	global shared_mem
 	global direction_costs
 
-	polycube = shared_mem[sm_key][2]
+	tmp_add = shared_mem[sm_key][2].copy()
 	new_polycubes_to_traverse = []
 
 	for direction_cost in direction_costs:
@@ -119,7 +119,6 @@ def try_extending_at_pos(*, cube_pos, sm_key, canonical_orig):
 			continue
 
 		# create p+1
-		tmp_add = polycube.copy()
 		tmp_add.add(pos=try_pos)
 
 		# skip if we've already seen some p+1 with the same canonical representation
@@ -133,6 +132,7 @@ def try_extending_at_pos(*, cube_pos, sm_key, canonical_orig):
 			else:
 				shared_mem[sm_key][0].append(canonical_try[0])
 		if should_continue:
+			tmp_add.remove(pos=try_pos)
 			continue
 		# why are we doing this?
 		# this seems to never run, so commenting this out for now
@@ -142,16 +142,40 @@ def try_extending_at_pos(*, cube_pos, sm_key, canonical_orig):
 		#	continue
 
 		# remove the last of the ordered cubes in p+1
-		tmp_remove = tmp_add.copy()
+		least_significant_cube_pos = enumerate(canonical_try[1]).__next__()[1]
 
 		# enumerate the set of "last cubes", and grab one, where
 		#   enumerate.__next__() returns a tuple of (index, value)
 		#   and thus we need to use the 1th element of the tuple
-		tmp_remove.remove(pos=enumerate(canonical_try[1]).__next__()[1])
+		#tmp_remove.remove(pos=enumerate(canonical_try[1]).__next__()[1])
+		tmp_add.remove(pos=least_significant_cube_pos)
+
 		# if p+1-1 has the same canonical representation as p, count it as a new unique polycube
 		#   and continue recursion into that p+1
-		if tmp_remove.find_canonical_info()[0] == canonical_orig:
-			new_polycubes_to_traverse.append(tmp_add)
+		if tmp_add.find_canonical_info()[0] == canonical_orig:
+			# replace the least significant cube we just removed
+			tmp_add.add(pos=least_significant_cube_pos)
+			new_polycubes_to_traverse.append(tmp_add.copy())
+			# revert creating p+1 to try adding a cube at another position
+			tmp_add.remove(pos=try_pos)
+
+		# undo the temporary removal of the least significant cube,
+		#   but only if it's not the same as the cube we just tried
+		#   since we remove that one before going to the next iteration
+		#   of the loop
+		elif least_significant_cube_pos != try_pos:
+			tmp_add.add(pos=least_significant_cube_pos)
+			# revert creating p+1 to try adding a cube at another position
+			tmp_add.remove(pos=try_pos)
+
+		# if we are not traversing the polycube, and we've already
+		#   removed the cube we just added, then we don't need it
+		#   before going on to the next iteration of the loop
+		elif least_significant_cube_pos == try_pos:
+			pass
+		else:
+			print('yikes')
+			sys.exit(1)
 
 	return new_polycubes_to_traverse
 
@@ -337,7 +361,7 @@ class Polycube:
 		# we are done if we've reached the desired n,
 		#   which we need to stop at because we are doing
 		#   a depth-first recursive evaluation
-		if self.n == limit_n:
+		if self.n >= limit_n:
 			return
 
 		# initialize/clear the global shared_mem
@@ -466,13 +490,13 @@ def print_results():
 			print(f'n = {n:>2}: {v}')
 
 if __name__ == "__main__":
-	if len(sys.argv) < 2:
-		print(f'usage: {sys.argv[0]} <threads> [<n> (default=4)]')
+	if len(sys.argv) < 2 or int(sys.argv[1]) < 0:
+		print(f'usage: {sys.argv[0]} <threads (0=no thread pool)> [<n> (default=4)]')
 		sys.exit(1)
 	signal.signal(signal.SIGINT, interrupt_handler)
 	print("use Ctrl+C once to print current results, or twice to stop\n")
 	start_time = time.perf_counter()
-	if sys.argv[1] == '1':
+	if sys.argv[1] == '0':
 		p = Polycube(create_initial_cube=True, pool_executor=None)
 		# enumerate all valid polycubes up to size limit_n
 		p.extend(limit_n=4 if len(sys.argv) < 3 else int(sys.argv[2]))
