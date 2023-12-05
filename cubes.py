@@ -185,7 +185,7 @@ def extend_with_thread_pool(*, polycube, limit_n):
 				#   a new thread to continue recursion into this p+1
 				# if the thread pool is already maxed out, then just
 				#   continue recursion within this thread
-				if thread_queue_check_wait_counter > 5 and pool_executor._work_queue.empty():
+				if thread_queue_check_wait_counter > 5 and outstanding_thread_queue.qsize() < pool_executor._max_workers:
 					thread_queue_check_wait_counter = 0
 					# track that we have a new submission to the thread pool
 					outstanding_thread_queue.put(0)
@@ -193,8 +193,8 @@ def extend_with_thread_pool(*, polycube, limit_n):
 					submitted_future.add_done_callback(extend_with_thread_pool_callback)
 				# continue recursion within this thread
 				else:
-					if thread_queue_check_wait_counter > 5:
-						thread_queue_check_wait_counter = 0
+					#if thread_queue_check_wait_counter > 5:
+					#	thread_queue_check_wait_counter = 0
 					extend_with_thread_pool(polycube=tmp_add.copy(), limit_n=limit_n)
 
 				# revert creating p+1 to try adding a cube at another position
