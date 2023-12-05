@@ -1,10 +1,13 @@
 # python3
 #
 
+import concurrent.futures
 from copy import deepcopy
 from functools import reduce
+from multiprocessing import Array as ConcurrentArray
 import signal
 import sys
+from threading import RLock
 import time
 
 def int_to_bit_list_unbound(n):
@@ -74,6 +77,11 @@ for cube_enc,max_value in maximum_rotated_cube_values.items():
 # count of unique polycubes of size n
 n_counts = [0 for i in range(22)]
 
+# global thread-safe list/array wrapper, not initialized here
+concurrent_tried_canonicals = {}
+concurrent_tried_canonicals_key_counter = 0
+lock = None
+
 class Cube:
 
 	def __init__(self, *, pos):
@@ -91,10 +99,47 @@ class Cube:
 		new_cube.neighbors = self.neighbors.copy()
 		return new_cube
 
+def try_extending_at_pos(*, polycube, try_pos, ctc_key):
+	global lock
+	global concurrent_tried_canonicals
+	# create p+1
+	polycube.add(pos=try_pos)
+
+	# skip if we've already seen some p+1 with the same canonical representation
+	#   (comparing the bitwise int only)
+	canonical_try = polycube.find_canonical_info()
+	should_continue = False
+	# use a lock to prevent concurrent access to the list
+	#with concurrent_tried_canonicals.get_lock():
+	with lock:
+		if canonical_try[0] in concurrent_tried_canonicals[ctc_key]:
+			should_continue = True
+		else:
+			concurrent_tried_canonicals[ctc_key].append(canonical_try[0])
+	if should_continue:
+		return (None, None)
+	# why are we doing this?
+	# this seems to never run, so commenting this out for now
+	#if try_pos in canonical_try[2]:
+	#	print("we are doing the thing")
+	#	polycube.extend(limit_n=limit_n)
+	#	continue
+
+	# remove the last of the ordered cubes in p+1
+	tmp_remove = polycube.copy()
+
+	# enumerate the set of "last cubes", and grab one, where
+	#   enumerate.__next__() returns a tuple of (index, value)
+	#   and thus we need to use the 1th element of the tuple
+	tmp_remove.remove(pos=enumerate(canonical_try[1]).__next__()[1])
+	# if p+1-1 has the same canonical representation as p, count it as a new unique polycube
+	#   and continue recursion into that p+1
+	return (tmp_remove.find_canonical_info(), polycube)
+
 class Polycube:
 
 	# initialize with 1 cube at (0, 0, 0)
-	def __init__(self, create_initial_cube):
+	def __init__(self, create_initial_cube, pool_executor=None):
 		self.canonical_info = None
 		# number of cubes in this polycube
 		self.n = 0
@@ -103,6 +148,7 @@ class Polycube:
 		if create_initial_cube:
 			self.n = 1
 			self.cubes[0] = Cube(pos=0)
+		self.pool_executor = pool_executor
 
 	def copy(self):
 		new_polycube = Polycube(create_initial_cube=False)
@@ -261,7 +307,66 @@ class Polycube:
 		self.canonical_info = canonical
 		return canonical
 
-	def extend(self, *, limit_n):
+	def extend_with_thread_pool(self, *, limit_n, pool_exec):
+		global direction_costs
+		global n_counts
+		global concurrent_tried_canonicals
+		global concurrent_tried_canonicals_key_counter
+		# since this is a valid polycube, increment the count
+		n_counts[self.n] += 1
+
+		# we are done if we've reached the desired n,
+		#   which we need to stop at because we are doing
+		#   a depth-first recursive evaluation
+		if self.n == limit_n:
+			return
+		# keep a Set of all evaluated positions so we don't repeat them
+		tried_pos = set(self.cubes.keys())
+
+		# initialize/clear the global concurrent_tried_canonicals
+		# using 'I' to signify the list/array is of type unsigned int
+		# using 0 to initialize an empty list/array
+		concurrent_tried_canonicals_key_counter += 1
+		concurrent_tried_canonicals_key = concurrent_tried_canonicals_key_counter
+		concurrent_tried_canonicals[concurrent_tried_canonicals_key] = []
+
+		canonical_orig = self.find_canonical_info()
+
+		# try first without setting a callback on each future
+		futures = []
+
+		# faster to declare a variable here, ahead of the loop?
+		#   or can the varaible just be declared and used inside the loop?
+		try_pos = 0
+		# for each cube, for each direction, add a cube
+		for cube in self.cubes.values():
+			for direction_cost in direction_costs:
+				try_pos = cube.pos + direction_cost
+				if try_pos in tried_pos:
+					continue
+				tried_pos.add(try_pos)
+
+				futures.append(pool_exec.submit(try_extending_at_pos, polycube=self.copy(), try_pos=try_pos, ctc_key=concurrent_tried_canonicals_key))
+				#future.add_done_callback(self.extend_with_thread_pool_callback)
+
+		# wait for all futures to complete
+		while any(not future.done() for future in futures):
+			time.sleep(0.0001)
+
+		# there is no "clear()" function for ctypes arrays... so we
+		#   just re-initialize above to overwrite
+		#with concurrent_tried_canonicals.get_lock():
+		#	concurrent_tried_canonicals.clear()
+		del concurrent_tried_canonicals[concurrent_tried_canonicals_key]
+
+		for future in futures:
+			canonical_try_removed, tmp_add = future.result()
+			if canonical_try_removed is None:
+				continue
+			if self.are_canonical_infos_equal(canonical_try_removed, canonical_orig):
+				tmp_add.extend_with_thread_pool(limit_n=limit_n, pool_exec=pool_exec)
+
+	def extend_single_thread(self, *, limit_n):
 		global direction_costs
 		global n_counts
 		# since this is a valid polycube, increment the count
@@ -302,10 +407,11 @@ class Polycube:
 
 				tried_canonicals.append(canonical_try)
 				# why are we doing this?
-				if try_pos in canonical_try[2]:
-					print("we are doing the thing")
-					tmp_add.extend(limit_n=limit_n)
-					continue
+				# this seems to never run, so commenting this out for now
+				#if try_pos in canonical_try[2]:
+				#	print("we are doing the thing")
+				#	tmp_add.extend_single_thread(limit_n=limit_n)
+				#	continue
 
 				# remove the last of the ordered cubes in p+1
 				tmp_remove = tmp_add.copy()
@@ -318,7 +424,16 @@ class Polycube:
 				#   and continue recursion into that p+1
 				canonical_try_removed = tmp_remove.find_canonical_info()
 				if self.are_canonical_infos_equal(canonical_try_removed, canonical_orig):
-					tmp_add.extend(limit_n=limit_n)
+					tmp_add.extend_single_thread(limit_n=limit_n)
+
+	def extend(self, *, limit_n):
+		global lock
+		# use the concurrent version of this function if we have a pool_executor
+		if self.pool_executor is None:
+			return self.extend_single_thread(limit_n=limit_n)
+		else:
+			lock = RLock()
+			return self.extend_with_thread_pool(limit_n=limit_n, pool_exec=self.pool_executor)
 
 last_interrupt_time = 0
 
@@ -343,11 +458,20 @@ def print_results():
 			print(f'n = {n:>2}: {v}')
 
 if __name__ == "__main__":
+	if len(sys.argv) < 2 or sys.argv[1] not in ['single', 'multi']:
+		print(f'usage: {sys.argv[0]} <"single"|"multi"> [<n> (default=4)]')
+		sys.exit(1)
 	signal.signal(signal.SIGINT, interrupt_handler)
 	print("use Ctrl+C once to print current results, or twice to stop\n")
 	start_time = time.perf_counter()
-	p = Polycube(create_initial_cube=True)
-	# enumerate all valid polycubes up to size limit_n
-	p.extend(limit_n=4 if len(sys.argv) < 2 else int(sys.argv[1]))
+	if sys.argv[1] == 'single':
+		p = Polycube(create_initial_cube=True, pool_executor=None)
+		# enumerate all valid polycubes up to size limit_n
+		p.extend(limit_n=4 if len(sys.argv) < 3 else int(sys.argv[2]))
+	else:
+		with concurrent.futures.ThreadPoolExecutor() as pool_executor:
+			p = Polycube(create_initial_cube=True, pool_executor=pool_executor)
+			# enumerate all valid polycubes up to size limit_n
+			p.extend(limit_n=4 if len(sys.argv) < 3 else int(sys.argv[2]))
 	print_results()
 	print(f'elapsed seconds: {time.perf_counter() - start_time}')
