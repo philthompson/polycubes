@@ -17,6 +17,30 @@ See the original javascript implementation and README.md file at:
 
 https://github.com/mikepound/opencubes/tree/9ad224fd4f35b31d5b37d62fcbd1b871f9b9600c/javascript
 
+Running times (in seconds) for n=11 on an M1 Mac mini:
+| python |  pypy |  commit | threadpool/threads |
+|   ---: |  ---: |  :---:  |       :---:        |
+| 1050.0 |       | 44f96a5 | no                 |
+| 768.5  | 284.0 | cb8a167 | no                 |
+| 830.8  | 638.8 | cb8a167 | 7                  |
+
+The best single-threaded performance so far (commit cb8a167), on an M1 Mac mini with pypy3.10:
+```
+results:
+n =  1: 1
+...
+n = 11: 2522522
+elapsed seconds: 284.0069517500233
+```
+
+The best 7-threads performance so far (commit cb8a167), on an M1 Mac mini with pypy3.10:
+```
+results:
+n =  1: 1
+...
+n = 11: 2522522
+elapsed seconds: 638.8414816251025
+```
 
 Initial single-threaded running time on an M1 Mac mini:
 ```
