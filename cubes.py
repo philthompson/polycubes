@@ -77,9 +77,9 @@ for cube_enc,max_value in maximum_rotated_cube_values.items():
 # count of unique polycubes of size n
 n_counts = [0 for i in range(22)]
 
-# global thread-safe list/array wrapper, not initialized here
-concurrent_tried_canonicals = {}
-concurrent_tried_canonicals_key_counter = 0
+# global memory to be shared among threads
+shared_mem = {}
+shared_mem_key_counter = 0
 lock = None
 
 class Cube:
@@ -99,42 +99,61 @@ class Cube:
 		new_cube.neighbors = self.neighbors.copy()
 		return new_cube
 
-def try_extending_at_pos(*, polycube, try_pos, ctc_key):
+def try_extending_at_pos(*, cube_pos, sm_key, canonical_orig):
 	global lock
-	global concurrent_tried_canonicals
-	# create p+1
-	polycube.add(pos=try_pos)
+	global shared_mem
+	global direction_costs
 
-	# skip if we've already seen some p+1 with the same canonical representation
-	#   (comparing the bitwise int only)
-	canonical_try = polycube.find_canonical_info()
-	should_continue = False
-	# use a lock to prevent concurrent access to the list
-	#with concurrent_tried_canonicals.get_lock():
-	with lock:
-		if canonical_try[0] in concurrent_tried_canonicals[ctc_key]:
-			should_continue = True
-		else:
-			concurrent_tried_canonicals[ctc_key].append(canonical_try[0])
-	if should_continue:
-		return (None, None)
-	# why are we doing this?
-	# this seems to never run, so commenting this out for now
-	#if try_pos in canonical_try[2]:
-	#	print("we are doing the thing")
-	#	polycube.extend(limit_n=limit_n)
-	#	continue
+	polycube = shared_mem[sm_key][2]
+	new_polycubes_to_traverse = []
 
-	# remove the last of the ordered cubes in p+1
-	tmp_remove = polycube.copy()
+	for direction_cost in direction_costs:
+		try_pos = cube_pos + direction_cost
+		should_continue = False
+		with lock:
+			if try_pos in shared_mem[sm_key][1]:
+				should_continue = True
+			else:
+				shared_mem[sm_key][1].add(try_pos)
+		if should_continue:
+			continue
 
-	# enumerate the set of "last cubes", and grab one, where
-	#   enumerate.__next__() returns a tuple of (index, value)
-	#   and thus we need to use the 1th element of the tuple
-	tmp_remove.remove(pos=enumerate(canonical_try[1]).__next__()[1])
-	# if p+1-1 has the same canonical representation as p, count it as a new unique polycube
-	#   and continue recursion into that p+1
-	return (tmp_remove.find_canonical_info(), polycube)
+		# create p+1
+		tmp_add = polycube.copy()
+		tmp_add.add(pos=try_pos)
+
+		# skip if we've already seen some p+1 with the same canonical representation
+		#   (comparing the bitwise int only)
+		canonical_try = tmp_add.find_canonical_info()
+		should_continue = False
+		# use a lock to prevent concurrent access to the list
+		with lock:
+			if canonical_try[0] in shared_mem[sm_key][0]:
+				should_continue = True
+			else:
+				shared_mem[sm_key][0].append(canonical_try[0])
+		if should_continue:
+			continue
+		# why are we doing this?
+		# this seems to never run, so commenting this out for now
+		#if try_pos in canonical_try[2]:
+		#	print("we are doing the thing")
+		#	tmp_add.extend(limit_n=limit_n)
+		#	continue
+
+		# remove the last of the ordered cubes in p+1
+		tmp_remove = tmp_add.copy()
+
+		# enumerate the set of "last cubes", and grab one, where
+		#   enumerate.__next__() returns a tuple of (index, value)
+		#   and thus we need to use the 1th element of the tuple
+		tmp_remove.remove(pos=enumerate(canonical_try[1]).__next__()[1])
+		# if p+1-1 has the same canonical representation as p, count it as a new unique polycube
+		#   and continue recursion into that p+1
+		if tmp_remove.find_canonical_info()[0] == canonical_orig:
+			new_polycubes_to_traverse.append(tmp_add)
+
+	return new_polycubes_to_traverse
 
 class Polycube:
 
@@ -310,8 +329,8 @@ class Polycube:
 	def extend_with_thread_pool(self, *, limit_n, pool_exec):
 		global direction_costs
 		global n_counts
-		global concurrent_tried_canonicals
-		global concurrent_tried_canonicals_key_counter
+		global shared_mem
+		global shared_mem_key_counter
 		# since this is a valid polycube, increment the count
 		n_counts[self.n] += 1
 
@@ -320,15 +339,17 @@ class Polycube:
 		#   a depth-first recursive evaluation
 		if self.n == limit_n:
 			return
-		# keep a Set of all evaluated positions so we don't repeat them
-		tried_pos = set(self.cubes.keys())
 
-		# initialize/clear the global concurrent_tried_canonicals
+		# initialize/clear the global shared_mem
 		# using 'I' to signify the list/array is of type unsigned int
 		# using 0 to initialize an empty list/array
-		concurrent_tried_canonicals_key_counter += 1
-		concurrent_tried_canonicals_key = concurrent_tried_canonicals_key_counter
-		concurrent_tried_canonicals[concurrent_tried_canonicals_key] = []
+		shared_mem_key_counter += 1
+		shared_mem_key = shared_mem_key_counter
+		# shared memory among all threads kicked off here:
+		# 0 - a list of all canonical encodings (int values) we've tried
+		# 1 - a Set of all evaluated positions (int values) so we don't repeat them
+		# 2 - a reference to this polycube instance
+		shared_mem[shared_mem_key] = [[], set(self.cubes.keys()), self]
 
 		canonical_orig = self.find_canonical_info()
 
@@ -340,30 +361,17 @@ class Polycube:
 		try_pos = 0
 		# for each cube, for each direction, add a cube
 		for cube in self.cubes.values():
-			for direction_cost in direction_costs:
-				try_pos = cube.pos + direction_cost
-				if try_pos in tried_pos:
-					continue
-				tried_pos.add(try_pos)
-
-				futures.append(pool_exec.submit(try_extending_at_pos, polycube=self.copy(), try_pos=try_pos, ctc_key=concurrent_tried_canonicals_key))
-				#future.add_done_callback(self.extend_with_thread_pool_callback)
+			futures.append(pool_exec.submit(try_extending_at_pos, cube_pos=cube.pos, sm_key=shared_mem_key, canonical_orig=canonical_orig[0]))
 
 		# wait for all futures to complete
 		while any(not future.done() for future in futures):
-			time.sleep(0.0001)
+			time.sleep(0.0000001)
 
-		# there is no "clear()" function for ctypes arrays... so we
-		#   just re-initialize above to overwrite
-		#with concurrent_tried_canonicals.get_lock():
-		#	concurrent_tried_canonicals.clear()
-		del concurrent_tried_canonicals[concurrent_tried_canonicals_key]
+		# we are now done with the memory shared by these threads
+		del shared_mem[shared_mem_key]
 
 		for future in futures:
-			canonical_try_removed, tmp_add = future.result()
-			if canonical_try_removed is None:
-				continue
-			if self.are_canonical_infos_equal(canonical_try_removed, canonical_orig):
+			for tmp_add in future.result():
 				tmp_add.extend_with_thread_pool(limit_n=limit_n, pool_exec=pool_exec)
 
 	def extend_single_thread(self, *, limit_n):
@@ -458,18 +466,18 @@ def print_results():
 			print(f'n = {n:>2}: {v}')
 
 if __name__ == "__main__":
-	if len(sys.argv) < 2 or sys.argv[1] not in ['single', 'multi']:
-		print(f'usage: {sys.argv[0]} <"single"|"multi"> [<n> (default=4)]')
+	if len(sys.argv) < 2:
+		print(f'usage: {sys.argv[0]} <threads> [<n> (default=4)]')
 		sys.exit(1)
 	signal.signal(signal.SIGINT, interrupt_handler)
 	print("use Ctrl+C once to print current results, or twice to stop\n")
 	start_time = time.perf_counter()
-	if sys.argv[1] == 'single':
+	if sys.argv[1] == '1':
 		p = Polycube(create_initial_cube=True, pool_executor=None)
 		# enumerate all valid polycubes up to size limit_n
 		p.extend(limit_n=4 if len(sys.argv) < 3 else int(sys.argv[2]))
 	else:
-		with concurrent.futures.ThreadPoolExecutor() as pool_executor:
+		with concurrent.futures.ThreadPoolExecutor(max_workers=int(sys.argv[1])) as pool_executor:
 			p = Polycube(create_initial_cube=True, pool_executor=pool_executor)
 			# enumerate all valid polycubes up to size limit_n
 			p.extend(limit_n=4 if len(sys.argv) < 3 else int(sys.argv[2]))
