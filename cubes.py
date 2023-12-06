@@ -125,7 +125,7 @@ def extend_with_thread_pool(*, polycube, limit_n):
 	# keep a Set of all evaluated positions so we don't repeat them
 	tried_pos = set(polycube.cubes.keys())
 
-	tried_canonicals = []
+	tried_canonicals = set()
 	canonical_orig = polycube.find_canonical_info()
 	tmp_add = polycube.copy()
 
@@ -137,9 +137,9 @@ def extend_with_thread_pool(*, polycube, limit_n):
 	#thread_queue_check_wait_counter = 0
 
 	# for each cube, for each direction, add a cube
-	for cube in polycube.cubes.values():
+	for cube_pos in polycube.cubes:
 		for direction_cost in direction_costs:
-			try_pos = cube.pos + direction_cost
+			try_pos = cube_pos + direction_cost
 			if try_pos in tried_pos:
 				continue
 			tried_pos.add(try_pos)
@@ -150,11 +150,11 @@ def extend_with_thread_pool(*, polycube, limit_n):
 			# skip if we've already seen some p+1 with the same canonical representation
 			#   (comparing the bitwise int only)
 			canonical_try = tmp_add.find_canonical_info()
-			if any(canonical_try[0] == tried_canonical[0] for tried_canonical in tried_canonicals):
+			if canonical_try[0] in tried_canonicals:
 				tmp_add.remove(pos=try_pos)
 				continue
 
-			tried_canonicals.append(canonical_try)
+			tried_canonicals.add(canonical_try[0])
 			# why are we doing this?
 			# this seems to never run, so commenting this out for now
 			#if try_pos in canonical_try[2]:
@@ -200,23 +200,16 @@ def extend_with_thread_pool(*, polycube, limit_n):
 					#	thread_queue_check_wait_counter = 0
 					extend_with_thread_pool(polycube=tmp_add.copy(), limit_n=limit_n)
 
-				# revert creating p+1 to try adding a cube at another position
-				tmp_add.remove(pos=try_pos)
-
 			# undo the temporary removal of the least significant cube,
 			#   but only if it's not the same as the cube we just tried
 			#   since we remove that one before going to the next iteration
 			#   of the loop
 			elif least_significant_cube_pos != try_pos:
 				tmp_add.add(pos=least_significant_cube_pos)
-				# revert creating p+1 to try adding a cube at another position
-				tmp_add.remove(pos=try_pos)
 
-			# if we are not traversing the polycube, and we've already
-			#   removed the cube we just added, then we don't need it
-			#   before going on to the next iteration of the loop
-			else:
-				pass
+			# revert creating p+1 to try adding a cube at another position
+			tmp_add.remove(pos=try_pos)
+
 	# since we're done, decrement the count of outstanding threads
 	return
 
