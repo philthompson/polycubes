@@ -404,7 +404,7 @@ class Polycube:
 		# keep a Set of all evaluated positions so we don't repeat them
 		tried_pos = set(self.cubes.keys())
 
-		tried_canonicals = []
+		tried_canonicals = set()
 
 		canonical_orig = self.find_canonical_info()
 
@@ -414,9 +414,9 @@ class Polycube:
 		#   or can the varaible just be declared and used inside the loop?
 		try_pos = 0
 		# for each cube, for each direction, add a cube
-		for cube in self.cubes.values():
+		for cube_pos in self.cubes:
 			for direction_cost in direction_costs:
-				try_pos = cube.pos + direction_cost
+				try_pos = cube_pos + direction_cost
 				if try_pos in tried_pos:
 					continue
 				tried_pos.add(try_pos)
@@ -427,11 +427,11 @@ class Polycube:
 				# skip if we've already seen some p+1 with the same canonical representation
 				#   (comparing the bitwise int only)
 				canonical_try = tmp_add.find_canonical_info()
-				if any(canonical_try[0] == tried_canonical[0] for tried_canonical in tried_canonicals):
+				if canonical_try[0] in tried_canonicals:
 					tmp_add.remove(pos=try_pos)
 					continue
 
-				tried_canonicals.append(canonical_try)
+				tried_canonicals.add(canonical_try[0])
 				# why are we doing this?
 				# this seems to never run, so commenting this out for now
 				#if try_pos in canonical_try[2]:
@@ -456,8 +456,6 @@ class Polycube:
 					tmp_add.add(pos=least_significant_cube_pos)
 					# make a copy here for continuing recursion upon
 					tmp_add.copy().extend_single_thread(limit_n=limit_n)
-					# revert creating p+1 to try adding a cube at another position
-					tmp_add.remove(pos=try_pos)
 
 				# undo the temporary removal of the least significant cube,
 				#   but only if it's not the same as the cube we just tried
@@ -465,14 +463,9 @@ class Polycube:
 				#   of the loop
 				elif least_significant_cube_pos != try_pos:
 					tmp_add.add(pos=least_significant_cube_pos)
-					# revert creating p+1 to try adding a cube at another position
-					tmp_add.remove(pos=try_pos)
 
-				# if we are not traversing the polycube, and we've already
-				#   removed the cube we just added, then we don't need it
-				#   before going on to the next iteration of the loop
-				else:
-					pass
+				# revert creating p+1 to try adding a cube at another position
+				tmp_add.remove(pos=try_pos)
 
 	def extend(self, *, limit_n):
 		#global lock
