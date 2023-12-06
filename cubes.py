@@ -5,10 +5,9 @@ import concurrent.futures
 from copy import deepcopy
 from functools import reduce
 from multiprocessing import Array as ConcurrentArray
-from queue import SimpleQueue, Empty
+from queue import SimpleQueue
 import signal
 import sys
-#from threading import RLock
 import time
 import threading
 
@@ -80,9 +79,7 @@ for cube_enc,max_value in maximum_rotated_cube_values.items():
 n_counts = [0 for i in range(22)]
 
 # global stuff accessible by threads
-lock = None
 global_pool_executor = None
-new_seen_canonical_polycubes = SimpleQueue()
 outstanding_thread_queue = SimpleQueue()
 last_count_increment_time = None
 outstanding_thread_count = 0
@@ -105,22 +102,28 @@ class Cube:
 		return new_cube
 
 def extend_with_thread_pool_callback(future):
+	global n_counts
 	global outstanding_thread_queue
-	# the thread has completed, so decrement the running+queued thread count
+	global last_count_increment_time
+	for n,count in enumerate(future.result()):
+		n_counts[n] += count
+	last_count_increment_time = time.perf_counter()
+	# decrement the number of submitted/running threads
 	outstanding_thread_queue.get()
 
 # the function each thread will run
-def extend_with_thread_pool(*, polycube, limit_n):
+def extend_with_thread_pool(*, polycube, limit_n, initial_delegator):
 	global direction_costs
 	global global_pool_executor
-	global new_seen_canonical_polycubes
 	global outstanding_thread_queue
 
 	# we are done if we've reached the desired n,
 	#   which we need to stop at because we are doing
 	#   a depth-first recursive evaluation
 	if polycube.n == limit_n:
-		return
+		return []
+
+	found_counts_by_n = [0 for i in range(22)]
 
 	# keep a Set of all evaluated positions so we don't repeat them
 	tried_pos = set(polycube.cubes.keys())
@@ -132,9 +135,6 @@ def extend_with_thread_pool(*, polycube, limit_n):
 	# faster to declare a variable here, ahead of the loop?
 	#   or can the varaible just be declared and used inside the loop?
 	try_pos = 0
-
-	# using this to avoid checking the thead count (queue) too rapidly
-	#thread_queue_check_wait_counter = 0
 
 	# for each cube, for each direction, add a cube
 	for cube_pos in polycube.cubes:
@@ -178,27 +178,20 @@ def extend_with_thread_pool(*, polycube, limit_n):
 				# replace the least significant cube we just removed
 				tmp_add.add(pos=least_significant_cube_pos)
 				# allow the found polycube to be counted elsewhere
-				new_seen_canonical_polycubes.put(tmp_add.n)
-				# increment counter toward checking thread count again
-				#thread_queue_check_wait_counter += 1
-				# if the thread pool can handle another thread, submit
-				#   a new thread to continue recursion into this p+1
-				# if the thread pool is already maxed out, then just
-				#   continue recursion within this thread
-				#if thread_queue_check_wait_counter > 5 and outstanding_thread_queue.qsize() < pool_executor._max_workers:
-				if outstanding_thread_queue.qsize() < pool_executor._max_workers:
-					#print("submitting new thread")
-					#thread_queue_check_wait_counter = 0
-					# track that we have a new submission to the thread pool
+				found_counts_by_n[tmp_add.n] += 1
+				# the initial delegator submits jobs for threads,
+				#   but only if the found polycube has n=6
+				if initial_delegator and tmp_add.n == 6:
+					# increment the number of submitted+running threads
 					outstanding_thread_queue.put(0)
-					submitted_future = global_pool_executor.submit(extend_with_thread_pool, polycube=tmp_add.copy(), limit_n=limit_n)
+					submitted_future = global_pool_executor.submit(extend_with_thread_pool, polycube=tmp_add.copy(), limit_n=limit_n, initial_delegator=False)
 					submitted_future.add_done_callback(extend_with_thread_pool_callback)
-				# continue recursion within this thread
+
+				# otherwise, continue recursion within this thread
 				else:
-					#print("recursing within thread")
-					#if thread_queue_check_wait_counter > 5:
-					#	thread_queue_check_wait_counter = 0
-					extend_with_thread_pool(polycube=tmp_add.copy(), limit_n=limit_n)
+					further_counts = extend_with_thread_pool(polycube=tmp_add.copy(), limit_n=limit_n, initial_delegator=initial_delegator)
+					for n,count in enumerate(further_counts):
+						found_counts_by_n[n] += count
 
 			# undo the temporary removal of the least significant cube,
 			#   but only if it's not the same as the cube we just tried
@@ -210,8 +203,9 @@ def extend_with_thread_pool(*, polycube, limit_n):
 			# revert creating p+1 to try adding a cube at another position
 			tmp_add.remove(pos=try_pos)
 
-	# since we're done, decrement the count of outstanding threads
-	return
+	if initial_delegator and polycube.n == 1:
+		print(f"initial deletator is done, {outstanding_thread_queue.qsize()=}")
+	return found_counts_by_n
 
 class Polycube:
 
@@ -461,7 +455,6 @@ class Polycube:
 				tmp_add.remove(pos=try_pos)
 
 	def extend(self, *, limit_n):
-		#global lock
 		global global_pool_executor
 		global n_counts
 		global outstanding_thread_queue
@@ -469,11 +462,9 @@ class Polycube:
 		if global_pool_executor is None:
 			self.extend_single_thread(limit_n=limit_n)
 		else:
-			#lock = RLock()
-			n_counts[self.n] += 1
 			# track that we're about to start/queue a thread
 			outstanding_thread_queue.put(0)
-			submitted_future = global_pool_executor.submit(extend_with_thread_pool, polycube=self, limit_n=limit_n)
+			submitted_future = global_pool_executor.submit(extend_with_thread_pool, polycube=self, limit_n=limit_n, initial_delegator=True)
 			submitted_future.add_done_callback(extend_with_thread_pool_callback)
 
 last_interrupt_time = 0
@@ -505,7 +496,6 @@ if __name__ == "__main__":
 	signal.signal(signal.SIGINT, interrupt_handler)
 	print("use Ctrl+C once to print current results, or twice to stop\n")
 	start_time = time.perf_counter()
-	sleep_inc = 0.1
 	if sys.argv[1] == '0':
 		p = Polycube(create_initial_cube=True)
 		# enumerate all valid polycubes up to size limit_n
@@ -514,6 +504,7 @@ if __name__ == "__main__":
 		with concurrent.futures.ThreadPoolExecutor(max_workers=int(sys.argv[1])) as pool_executor:
 			global_pool_executor = pool_executor
 			p = Polycube(create_initial_cube=True)
+			n_counts[1] += 1
 			# enumerate all valid polycubes up to size limit_n
 			p.extend(limit_n=4 if len(sys.argv) < 3 else int(sys.argv[2]))
 			# we have to busy wait here, inside this "with ... as pool_executor"
@@ -522,28 +513,9 @@ if __name__ == "__main__":
 			#   the count for each new unique polycube we see
 			time.sleep(1.0)
 			while not outstanding_thread_queue.empty():
-				time.sleep(sleep_inc)
-				last_count_increment_time = time.perf_counter()
-				try:
-					while not new_seen_canonical_polycubes.empty():
-						n_counts[new_seen_canonical_polycubes.get()] += 1
-				except Empty:
-					print("empty!")
-					pass
+				time.sleep(3.0)
 			print("outstanding_thread_queue is empty")
-			# we reach this point when we are done, so do one
-			#   final check of the counts queue
-			try:
-				while not new_seen_canonical_polycubes.empty():
-					n_counts[new_seen_canonical_polycubes.get()] += 1
-			except Empty:
-				print("empty!")
-				pass
 	print_results()
 	if last_count_increment_time is None:
 		last_count_increment_time = time.perf_counter()
-	if sys.argv[1] == '0':
-		print(f'elapsed seconds: {last_count_increment_time - start_time}')
-	else:
-		precis_factor = 1.0 / sleep_inc
-		print(f'elapsed seconds: {round(precis_factor * (last_count_increment_time - start_time)) / precis_factor}')
+	print(f'elapsed seconds: {last_count_increment_time - start_time}')
