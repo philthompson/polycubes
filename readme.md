@@ -7,12 +7,12 @@ The "canonical" reporesentation of a cube is rotation-independent.
 
 This method avoids using a hashtable to store all seen unique polycubes: when we try to add a new `n+1`th cube to a polycube, we only count that as a unique polycube of size `n+1` if removing the "least significant" cube from that `n+1` cube leaves us with the canonical cube of size `n`.
 
-Much of this code is a port of their javascript implementation, but there are a few changes, including:
+Much of this code is a python 3 port of their javascript implementation, but there are a few changes, including:
 
 - using a single integer to represent the encoding of the polycube's adjacency graph
 - using a recursive depth-first traversal to build the adjacency graph
 - using the full 6 bits for each cube in the adjacency graph (not truncating once all cubes are represented)
-- an unfinished thread pool implementation that's currently slower than the single-threaded version
+- a ProcessPoolExecutor implementation that divides the work among multiple processes (threads)
 
 See the original javascript implementation and README.md file at:
 
@@ -32,3 +32,4 @@ Running times (in seconds) for 7 threads, *n=11*, on an M1 Mac mini:
 |        | 702.0 | 1d0b809 |
 | 914.7  | 671.5 | 6273cbd |
 | 758.6  | 306.0 | d1a6a62 |
+| 175.0  |  73.5 | 00ab2cf |

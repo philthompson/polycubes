@@ -1,9 +1,10 @@
 # python3
 #
 
+import argparse
 import concurrent.futures
 from copy import deepcopy
-import signal
+from datetime import timedelta
 import sys
 import time
 
@@ -91,7 +92,7 @@ n_counts = [0 for i in range(22)]
 global_pool_executor = None
 outstanding_threads = 0
 last_count_increment_time = None
-outstanding_thread_count = 0
+completed_threads = 0
 
 class Cube:
 
@@ -112,13 +113,15 @@ class Cube:
 
 def extend_with_thread_pool_callback(future):
 	global n_counts
-	global outstanding_threads
 	global last_count_increment_time
+	global outstanding_threads
+	global completed_threads
 	for n,count in enumerate(future.result()):
 		n_counts[n] += count
 	last_count_increment_time = time.perf_counter()
 	# decrement the number of submitted/running threads
 	outstanding_threads -= 1
+	completed_threads += 1
 
 # the function each thread will run
 def extend_with_thread_pool(*, polycube, limit_n, initial_delegator):
@@ -214,7 +217,7 @@ def extend_with_thread_pool(*, polycube, limit_n, initial_delegator):
 			tmp_add.remove(pos=try_pos)
 
 	if initial_delegator and polycube.n == 1:
-		print(f"initial deletator is done, {outstanding_threads=}")
+		print(f"initial delegator is done, {outstanding_threads=}")
 	return found_counts_by_n
 
 class Polycube:
@@ -476,53 +479,58 @@ class Polycube:
 			for n,count in enumerate(counts):
 				n_counts[n] += count
 
-last_interrupt_time = 0
-
-def interrupt_handler(sig, frame):
-	global last_interrupt_time
-	now = time.time()
-	do_halt = False
-	if now - last_interrupt_time < 2:
-		do_halt = True
-	else:
-		last_interrupt_time = now
-		print_results()
-	if do_halt:
-		print('\nstopping...')
-		sys.exit(0)
 
 def print_results():
 	global n_counts
-	print(f'\n\nresults: ({outstanding_threads=})')
+	print(f'\n\nresults:')
 	for n,v in enumerate(n_counts):
 		if n > 0 and v > 0:
 			print(f'n = {n:>2}: {v}')
 
 if __name__ == "__main__":
-	if len(sys.argv) < 2 or int(sys.argv[1]) < 0:
-		print(f'usage: {sys.argv[0]} <threads (0=no thread pool)> [<n> (default=4)]')
+	arg_parser = argparse.ArgumentParser(\
+		description='Count the number of (rotationally) unique polycubes containing up to n cubes')
+	arg_parser.add_argument('n', metavar='<n>', type=int,
+		help='the number of cubes the largest counted polycube should contain')
+	arg_parser.add_argument('--threads', metavar='<threads>', type=int, required=False,
+		default=0, help='0 for single-threaded, or the maximum number of threads to spawn simultaneously (default=0)')
+	arg_parser.add_argument('--spawn-n', metavar='<spawn-n>', type=int, required=False,
+		default=7, help='the smallest polycubes for which each will spawn a thread, higher->more shorter-lived threads (default=7)')
+
+	args = arg_parser.parse_args()
+	if args.n < 0 or args.threads < 0 or args.spawn_n < 0:
+		arg_parser.print_help()
 		sys.exit(1)
-	signal.signal(signal.SIGINT, interrupt_handler)
-	print("use Ctrl+C once to print current results, or twice to stop\n")
+
+	initial_delegator_spawn_n = args.spawn_n
+
 	start_time = time.perf_counter()
-	if sys.argv[1] == '0':
+	start_eta_time = time.time()
+	if args.threads == 0:
 		p = Polycube(create_initial_cube=True)
 		# enumerate all valid polycubes up to size limit_n
-		p.extend(limit_n=4 if len(sys.argv) < 3 else int(sys.argv[2]))
+		p.extend(limit_n=args.n)
 	else:
-		with concurrent.futures.ProcessPoolExecutor(max_workers=int(sys.argv[1])) as pool_executor:
+		with concurrent.futures.ProcessPoolExecutor(max_workers=args.threads) as pool_executor:
 			global_pool_executor = pool_executor
 			p = Polycube(create_initial_cube=True)
 			n_counts[1] += 1
 			# enumerate all valid polycubes up to size limit_n
-			p.extend(limit_n=4 if len(sys.argv) < 3 else int(sys.argv[2]))
+			p.extend(limit_n=args.n)
 			# we have to busy wait here, inside this "with ... as pool_executor"
 			#   block, in order to keep the ThreadPoolExecutor alive
-			# while waiting, we can do useful things here like incrementing
-			#   the count for each new unique polycube we see
-			time.sleep(1.0)
+			# while waiting, we can do useful things here like showing
+			#   useful timing/counts data
+			time.sleep(2.0)
 			while outstanding_threads > 0:
-				time.sleep(3.0)
+				time_elapsed = time.time() - start_eta_time
+				seconds_per_thread = time_elapsed / completed_threads
+				seconds_remaining = timedelta(seconds=round(seconds_per_thread * outstanding_threads))
+				pct_complete = (float(completed_threads) * 100.0) / (float(completed_threads) + float(outstanding_threads))
+				total_seconds = round((seconds_per_thread * outstanding_threads) + time_elapsed)
+				total_seconds_remaining = timedelta(seconds=round(total_seconds))
+				print(f'    {round(pct_complete,4)}% complete, ETA: [{seconds_remaining}], total: [{total_seconds_remaining}], counting for n={args.n}: [{n_counts[args.n]}], outstanding threads: [{outstanding_threads}]       ', end='\r')
+				time.sleep(1.0)
 			print("outstanding_threads is empty")
 	print_results()
 	if last_count_increment_time is None:
