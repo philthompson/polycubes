@@ -111,20 +111,6 @@ class Cube:
 		new_cube.neighbors = self.neighbors.copy()
 		return new_cube
 
-	def debug_compare(self, other):
-		any_mismatch = False
-		if self.pos != other.pos:
-			any_mismatch = True
-			print(f'cube pos mismatch: {self.pos=} vs {other.pos=}')
-		if self.enc != other.enc:
-			any_mismatch = True
-			print(f'cube enc mismatch: {self.enc=} vs {other.enc=}')
-		for i in range(6):
-			if (self.neighbors[i] is None and other.neighbors[i] is not None) or (self.neighbors[i] is not None and other.neighbors[i] is None):
-				any_mismatch = True
-				print(f'cube neighbor mismatch at index [{i}]: {self.neighbors[i]=} vs {other.neighbors[i]=}')
-		return any_mismatch
-
 def extend_with_thread_pool_callback(future):
 	global n_counts
 	global last_count_increment_time
@@ -323,38 +309,6 @@ class Polycube:
 		if create_initial_cube:
 			self.n = 1
 			self.cubes[0] = Cube(pos=0)
-
-	def debug_compare(self, other):
-		any_mismatch = False
-		if self.n != other.n:
-			any_mismatch = True
-			print(f'polycube n mismatch: {self.n=} vs {other.n=}')
-		if (self.canonical_info is None and other.canonical_info is not None) or (self.canonical_info is not None and other.canonical_info is None):
-			any_mismatch = True
-			print(f'polycube canonical_info mismatch: {self.canonical_info=} vs {other.canonical_info=}')
-		elif self.canonical_info is not None and other.canonical_info is not None:
-			#canonical = [0, set(), maximum_rotated_values_of_cubes]
-			if self.canonical_info[0] != other.canonical_info[0]:
-				any_mismatch = True
-				print(f'polycube canonical_info[0] mismatch: {self.canonical_info[0]=} vs {other.canonical_info[0]=}')
-			if self.canonical_info[1] != other.canonical_info[1]:
-				any_mismatch = True
-				print(f'polycube canonical_info[1] mismatch: {self.canonical_info[1]=} vs {other.canonical_info[1]=}')
-			if self.canonical_info[2] != other.canonical_info[2]:
-				any_mismatch = True
-				print(f'polycube canonical_info[2] mismatch: {self.canonical_info[2]=} vs {other.canonical_info[2]=}')
-		for pos in self.cubes:
-			if not pos in other.cubes:
-				any_mismatch = True
-				print(f'polycube cube pos mismatch: {pos=} not in other.cubes')
-			elif self.cubes[pos].debug_compare(other.cubes[pos]):
-				any_mismatch = True
-				print(f'polycube cube pos mismatch: (above)')
-		for pos in other.cubes:
-			if not pos in self.cubes:
-				any_mismatch = True
-				print(f'polycube cube pos mismatch: {pos=} not in self.cubes')
-		return any_mismatch
 
 	def copy(self):
 		new_polycube = Polycube(create_initial_cube=False)
