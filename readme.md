@@ -30,8 +30,9 @@ Running times (in seconds) for single-threaded, **n=11**, on an M1 Mac mini:
 | python |  pypy |  commit |
 |   ---: |  ---: |  :---:  |
 | 1050.0 |       | 44f96a5 |
-| 768.5  | 284.0 | cb8a167 |
-| 752.4  | 275.5 | df2c5a0 |
+|  768.5 | 284.0 | cb8a167 |
+|  752.4 | 275.5 | df2c5a0 |
+|  736.6 |       | 253a957 |
 
 Running times (in seconds) for 7 threads, **n=11**, on an M1 Mac mini:
 | python |  pypy |  commit |
@@ -41,3 +42,4 @@ Running times (in seconds) for 7 threads, **n=11**, on an M1 Mac mini:
 | 914.7  | 671.5 | 6273cbd |
 | 758.6  | 306.0 | d1a6a62 |
 | 175.0  |  73.5 | 00ab2cf |
+| 171.4  |  70.5 | 253a957 |
