@@ -111,6 +111,20 @@ class Cube:
 		new_cube.neighbors = self.neighbors.copy()
 		return new_cube
 
+	def debug_compare(self, other):
+		any_mismatch = False
+		if self.pos != other.pos:
+			any_mismatch = True
+			print(f'cube pos mismatch: {self.pos=} vs {other.pos=}')
+		if self.enc != other.enc:
+			any_mismatch = True
+			print(f'cube enc mismatch: {self.enc=} vs {other.enc=}')
+		for i in range(6):
+			if (self.neighbors[i] is None and other.neighbors[i] is not None) or (self.neighbors[i] is not None and other.neighbors[i] is None):
+				any_mismatch = True
+				print(f'cube neighbor mismatch at index [{i}]: {self.neighbors[i]=} vs {other.neighbors[i]=}')
+		return any_mismatch
+
 def extend_with_thread_pool_callback(future):
 	global n_counts
 	global last_count_increment_time
@@ -220,6 +234,83 @@ def extend_with_thread_pool(*, polycube, limit_n, initial_delegator):
 		print(f"initial delegator is done, {outstanding_threads=}")
 	return found_counts_by_n
 
+def extend_single_thread(*, polycube, limit_n):
+	global direction_costs
+	global n_counts
+
+	# since this is a valid polycube, increment the count
+	n_counts[polycube.n] += 1
+
+	# we are done if we've reached the desired n,
+	#   which we need to stop at because we are doing
+	#   a depth-first recursive evaluation
+	if polycube.n == limit_n:
+		return
+	# keep a Set of all evaluated positions so we don't repeat them
+	tried_pos = set(polycube.cubes.keys())
+
+	tried_canonicals = set()
+
+	canonical_orig = polycube.find_canonical_info()
+
+	# faster to declare a variable here, ahead of the loop?
+	#   or can the varaible just be declared and used inside the loop?
+	try_pos = 0
+	# for each cube, for each direction, add a cube
+	# create a list to iterate over because the dict will change
+	#   during recursion within the loop
+	for cube_pos in list(polycube.cubes.keys()):
+		for direction_cost in direction_costs:
+			try_pos = cube_pos + direction_cost
+			if try_pos in tried_pos:
+				continue
+			tried_pos.add(try_pos)
+
+			# create p+1
+			polycube.add(pos=try_pos)
+
+			# skip if we've already seen some p+1 with the same canonical representation
+			#   (comparing the bitwise int only)
+			canonical_try = polycube.find_canonical_info()
+			if canonical_try[0] in tried_canonicals:
+				polycube.remove(pos=try_pos)
+				continue
+
+			tried_canonicals.add(canonical_try[0])
+			# why are we doing this?
+			# this seems to never run, so commenting this out for now
+			#if try_pos in canonical_try[2]:
+			#	print("we are doing the thing")
+			#	extend_single_thread(polycube=polycube, limit_n=limit_n, depth=depth+1)
+			#	# revert creating p+1 to try adding a cube at another position
+			#	polycube.remove(pos=try_pos)
+			#	continue
+
+			# remove the last of the ordered cubes in p+1
+			least_significant_cube_pos = enumerate(canonical_try[1]).__next__()[1]
+
+			# enumerate the set of "last cubes", and grab one, where
+			#   enumerate.__next__() returns a tuple of (index, value)
+			#   and thus we need to use the 1th element of the tuple
+			polycube.remove(pos=least_significant_cube_pos)
+
+			# if p+1-1 has the same canonical representation as p, count it as a new unique polycube
+			#   and continue recursion into that p+1
+			if polycube.find_canonical_info()[0] == canonical_orig[0]:
+				# replace the least significant cube we just removed
+				polycube.add(pos=least_significant_cube_pos)
+				extend_single_thread(polycube=polycube, limit_n=limit_n)
+
+			# undo the temporary removal of the least significant cube,
+			#   but only if it's not the same as the cube we just tried
+			#   since we remove that one before going to the next iteration
+			#   of the loop
+			elif least_significant_cube_pos != try_pos:
+				polycube.add(pos=least_significant_cube_pos)
+
+			# revert creating p+1 to try adding a cube at another position
+			polycube.remove(pos=try_pos)
+
 class Polycube:
 
 	# initialize with 1 cube at (0, 0, 0)
@@ -232,6 +323,38 @@ class Polycube:
 		if create_initial_cube:
 			self.n = 1
 			self.cubes[0] = Cube(pos=0)
+
+	def debug_compare(self, other):
+		any_mismatch = False
+		if self.n != other.n:
+			any_mismatch = True
+			print(f'polycube n mismatch: {self.n=} vs {other.n=}')
+		if (self.canonical_info is None and other.canonical_info is not None) or (self.canonical_info is not None and other.canonical_info is None):
+			any_mismatch = True
+			print(f'polycube canonical_info mismatch: {self.canonical_info=} vs {other.canonical_info=}')
+		elif self.canonical_info is not None and other.canonical_info is not None:
+			#canonical = [0, set(), maximum_rotated_values_of_cubes]
+			if self.canonical_info[0] != other.canonical_info[0]:
+				any_mismatch = True
+				print(f'polycube canonical_info[0] mismatch: {self.canonical_info[0]=} vs {other.canonical_info[0]=}')
+			if self.canonical_info[1] != other.canonical_info[1]:
+				any_mismatch = True
+				print(f'polycube canonical_info[1] mismatch: {self.canonical_info[1]=} vs {other.canonical_info[1]=}')
+			if self.canonical_info[2] != other.canonical_info[2]:
+				any_mismatch = True
+				print(f'polycube canonical_info[2] mismatch: {self.canonical_info[2]=} vs {other.canonical_info[2]=}')
+		for pos in self.cubes:
+			if not pos in other.cubes:
+				any_mismatch = True
+				print(f'polycube cube pos mismatch: {pos=} not in other.cubes')
+			elif self.cubes[pos].debug_compare(other.cubes[pos]):
+				any_mismatch = True
+				print(f'polycube cube pos mismatch: (above)')
+		for pos in other.cubes:
+			if not pos in self.cubes:
+				any_mismatch = True
+				print(f'polycube cube pos mismatch: {pos=} not in self.cubes')
+		return any_mismatch
 
 	def copy(self):
 		new_polycube = Polycube(create_initial_cube=False)
@@ -390,95 +513,17 @@ class Polycube:
 		self.canonical_info = canonical
 		return canonical
 
-	def extend_single_thread(self, *, limit_n):
-		global direction_costs
-		global n_counts
-		# since this is a valid polycube, increment the count
-		n_counts[self.n] += 1
-
-		# we are done if we've reached the desired n,
-		#   which we need to stop at because we are doing
-		#   a depth-first recursive evaluation
-		if self.n == limit_n:
-			return
-		# keep a Set of all evaluated positions so we don't repeat them
-		tried_pos = set(self.cubes.keys())
-
-		tried_canonicals = set()
-
-		canonical_orig = self.find_canonical_info()
-
-		tmp_add = self.copy()
-
-		# faster to declare a variable here, ahead of the loop?
-		#   or can the varaible just be declared and used inside the loop?
-		try_pos = 0
-		# for each cube, for each direction, add a cube
-		for cube_pos in self.cubes:
-			for direction_cost in direction_costs:
-				try_pos = cube_pos + direction_cost
-				if try_pos in tried_pos:
-					continue
-				tried_pos.add(try_pos)
-
-				# create p+1
-				tmp_add.add(pos=try_pos)
-
-				# skip if we've already seen some p+1 with the same canonical representation
-				#   (comparing the bitwise int only)
-				canonical_try = tmp_add.find_canonical_info()
-				if canonical_try[0] in tried_canonicals:
-					tmp_add.remove(pos=try_pos)
-					continue
-
-				tried_canonicals.add(canonical_try[0])
-				# why are we doing this?
-				# this seems to never run, so commenting this out for now
-				#if try_pos in canonical_try[2]:
-				#	print("we are doing the thing")
-				#	tmp_add.copy().extend_single_thread(limit_n=limit_n)
-				#	# revert creating p+1 to try adding a cube at another position
-				#	tmp_add.remove(pos=try_pos)
-				#	continue
-
-				# remove the last of the ordered cubes in p+1
-				least_significant_cube_pos = enumerate(canonical_try[1]).__next__()[1]
-
-				# enumerate the set of "last cubes", and grab one, where
-				#   enumerate.__next__() returns a tuple of (index, value)
-				#   and thus we need to use the 1th element of the tuple
-				tmp_add.remove(pos=least_significant_cube_pos)
-
-				# if p+1-1 has the same canonical representation as p, count it as a new unique polycube
-				#   and continue recursion into that p+1
-				if tmp_add.find_canonical_info()[0] == canonical_orig[0]:
-					# replace the least significant cube we just removed
-					tmp_add.add(pos=least_significant_cube_pos)
-					# make a copy here for continuing recursion upon
-					tmp_add.copy().extend_single_thread(limit_n=limit_n)
-
-				# undo the temporary removal of the least significant cube,
-				#   but only if it's not the same as the cube we just tried
-				#   since we remove that one before going to the next iteration
-				#   of the loop
-				elif least_significant_cube_pos != try_pos:
-					tmp_add.add(pos=least_significant_cube_pos)
-
-				# revert creating p+1 to try adding a cube at another position
-				tmp_add.remove(pos=try_pos)
-
 	def extend(self, *, limit_n):
 		global global_pool_executor
 		global n_counts
 		# use the concurrent version of this function if we have a pool_executor
 		if global_pool_executor is None:
-			self.extend_single_thread(limit_n=limit_n)
+			extend_single_thread(polycube=self, limit_n=limit_n)
 		else:
 			# track that we're about to start/queue a thread
 			counts = extend_with_thread_pool(polycube=self, limit_n=limit_n, initial_delegator=True)
 			for n,count in enumerate(counts):
 				n_counts[n] += count
-
 
 def print_results():
 	global n_counts

@@ -1,4 +1,10 @@
 
+## Polycubes
+
+A python 3 implementation of a hashtable-less polycube enumerator.
+
+## Background
+
 See https://github.com/mikepound/opencubes for the original implementation and community-provided improvements from the Computerphile video at https://www.youtube.com/watch?v=g9n0a0644B4
 
 Uses a method defined by GitHub user "presseyt" to find a "canonical" representation of a cube.
@@ -18,14 +24,16 @@ See the original javascript implementation and README.md file at:
 
 https://github.com/mikepound/opencubes/tree/9ad224fd4f35b31d5b37d62fcbd1b871f9b9600c/javascript
 
-Running times (in seconds) for single-threaded, *n=11*, on an M1 Mac mini:
+## Running times
+
+Running times (in seconds) for single-threaded, **n=11**, on an M1 Mac mini:
 | python |  pypy |  commit |
 |   ---: |  ---: |  :---:  |
 | 1050.0 |       | 44f96a5 |
 | 768.5  | 284.0 | cb8a167 |
 | 752.4  | 275.5 | df2c5a0 |
 
-Running times (in seconds) for 7 threads, *n=11*, on an M1 Mac mini:
+Running times (in seconds) for 7 threads, **n=11**, on an M1 Mac mini:
 | python |  pypy |  commit |
 |   ---: |  ---: |  :---:  |
 | 830.8  | 638.8 | cb8a167 |
