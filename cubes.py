@@ -2,9 +2,14 @@
 #
 
 import argparse
-import concurrent.futures
+from concurrent.futures import CancelledError, ProcessPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
 from copy import deepcopy
 from datetime import timedelta
+from multiprocessing import Manager, Pipe, Process
+from pathlib import Path
+from queue import Empty as QueueEmpty
+import signal
 import sys
 import time
 
@@ -72,6 +77,13 @@ for cube_enc,max_value in maximum_rotated_cube_values.items():
 		if rotate_value(cube_enc, rotation) == max_value:
 			maximum_cube_rotation_indices[cube_enc].append(i)
 
+# from https://oeis.org/A000162
+# these are the number of unique polycubes of size n,
+#   which is kind of funny to put in a program that
+#   calculates these values -- but these are needed to
+#   help calculate estimated time remaining
+well_known_n_counts = [0, 1, 1, 2, 8, 29, 166, 1023, 6922, 48311, 346543, 2522522, 18598427, 138462649, 1039496297, 7859514470, 59795121480]
+
 # the n value at which found canonical polycubes are
 #   submitted as jobs for threads to continue recursion
 # at n=4, there are only 8 possible polycubes, so only
@@ -88,14 +100,7 @@ initial_delegator_spawn_n = 6
 # count of unique polycubes of size n
 n_counts = [0]*22
 
-# global stuff accessible by threads
-global_pool_executor = None
-outstanding_threads = 0
-last_count_increment_time = None
-completed_threads = 0
-
 class Cube:
-
 	def __init__(self, *, pos):
 		# position in the polycube defined as (x + 100y + 10,000z)
 		self.pos = pos
@@ -111,24 +116,50 @@ class Cube:
 		new_cube.neighbors = self.neighbors.copy()
 		return new_cube
 
-def extend_with_thread_pool_callback(future):
-	global n_counts
-	global last_count_increment_time
-	global outstanding_threads
-	global completed_threads
-	for n,count in enumerate(future.result()):
-		n_counts[n] += count
-	last_count_increment_time = time.perf_counter()
-	# decrement the number of submitted/running threads
-	outstanding_threads -= 1
-	completed_threads += 1
+# the initial delegator worker begins here
+def delegate_extend(polycube, n, halt_pipe_recv, submit_queue, response_queue, spawn_n):
+	extend_with_thread_pool(
+		polycube=polycube,
+		limit_n=n,
+		delegate_at_n=spawn_n,
+		submit_queue=submit_queue,
+		response_queue=response_queue,
+		halt_pipe=halt_pipe_recv,
+		depth=0)
 
-# the function each thread will run
-def extend_with_thread_pool(*, polycube, limit_n, initial_delegator):
+# the regular workers begin here
+def worker_extend_outer(n, halt_pipe_recv, done_pipe_recv, submit_queue, response_queue):
+	halted = False
+	# wait for work to arrive if halt hasn't been signalled yet
+	#while not halted and not submit_queue.empty():
+	while not halted:
+		if not halted and (halt_pipe_recv.poll() or done_pipe_recv.poll()):
+			halted = True
+		try:
+			polycube = submit_queue.get(block = True, timeout = 5.0)
+			extend_with_thread_pool(
+				polycube=polycube,
+				limit_n=n,
+				delegate_at_n=0,
+				submit_queue=submit_queue,
+				response_queue=response_queue,
+				halt_pipe=halt_pipe_recv,
+				depth=0)
+		except QueueEmpty:
+			pass
+	# after halt, drain the queue
+	found_something = True
+	while found_something:
+		try:
+			polycube = submit_queue.get(block = True, timeout = 5.0)
+			# put a message here to indicate that this Polycube is
+			#   unevaluated
+			response_queue.put((False, polycube))
+		except QueueEmpty:
+			found_something = False
+
+def extend_with_thread_pool(*, polycube, limit_n, delegate_at_n, submit_queue, response_queue, halt_pipe, depth):
 	global direction_costs
-	global global_pool_executor
-	global outstanding_threads
-	global initial_delegator_spawn_n
 
 	# we are done if we've reached the desired n,
 	#   which we need to stop at because we are doing
@@ -152,6 +183,25 @@ def extend_with_thread_pool(*, polycube, limit_n, initial_delegator):
 	# for each cube, for each direction, add a cube
 	for cube_pos in polycube.cubes:
 		for direction_cost in direction_costs:
+			# if halt has been signalled, abandon the evaluation
+			#   of this polycube
+			if halt_pipe.poll():
+				# when abandoning, we may be deep into recursion, in which
+				#   case we should do nothing while bubbling back up until
+				#   we've reached a depth of 0
+				if depth > 0:
+					return []
+				# at a depth of 0, we need to record the intitial polycube
+				#   as unevaluated (to be resumed later)
+				elif delegate_at_n == 0:
+					response_queue.put((False, polycube.copy()))
+					return
+				# maybe indicate that the initial delegator worker was
+				#   halted with a special-case None value here
+				else:
+					response_queue.put((False, None))
+					return
+
 			try_pos = cube_pos + direction_cost
 			if try_pos in tried_pos:
 				continue
@@ -193,16 +243,21 @@ def extend_with_thread_pool(*, polycube, limit_n, initial_delegator):
 				# allow the found polycube to be counted elsewhere
 				found_counts_by_n[tmp_add.n] += 1
 				# the initial delegator submits jobs for threads,
-				#   but only if the found polycube has n=6
-				if initial_delegator and tmp_add.n == initial_delegator_spawn_n:
-					# increment the number of submitted+running threads
-					outstanding_threads += 1
-					submitted_future = global_pool_executor.submit(extend_with_thread_pool, polycube=tmp_add.copy(), limit_n=limit_n, initial_delegator=False)
-					submitted_future.add_done_callback(extend_with_thread_pool_callback)
+				#   but only if the found polycube has n=spawn_n
+				if delegate_at_n > 0 and tmp_add.n == delegate_at_n:
+					submit_queue.put(tmp_add.copy())
 
 				# otherwise, continue recursion within this thread
 				else:
-					further_counts = extend_with_thread_pool(polycube=tmp_add.copy(), limit_n=limit_n, initial_delegator=initial_delegator)
+					#further_counts = extend_with_thread_pool(polycube=tmp_add.copy(), limit_n=limit_n, initial_delegator=initial_delegator, write_to_file_queue=write_to_file_queue, halt_pipe=halt_pipe, submitted_threads=submitted_threads)
+					further_counts = extend_with_thread_pool(\
+						polycube=tmp_add.copy(), \
+						limit_n=limit_n, \
+						delegate_at_n=delegate_at_n, \
+						submit_queue=submit_queue, \
+						response_queue=response_queue, \
+						halt_pipe=halt_pipe, \
+						depth=depth+1)
 					for n,count in enumerate(further_counts):
 						found_counts_by_n[n] += count
 
@@ -216,110 +271,28 @@ def extend_with_thread_pool(*, polycube, limit_n, initial_delegator):
 			# revert creating p+1 to try adding a cube at another position
 			tmp_add.remove(pos=try_pos)
 
-	#if initial_delegator and polycube.n == 1:
-	#	print(f"initial delegator is done, {outstanding_threads=}")
-	return found_counts_by_n
-
-# this is a version of extend_with_thread_pool() that
-#   re-uses the same polycube instance in some places
-#   instead of initially calling .copy(), but it's
-#   slightly slower instead of being faster as expected
-def extend_with_thread_pool_nocopy(*, polycube, limit_n, initial_delegator):
-	global direction_costs
-	global global_pool_executor
-	global outstanding_threads
-	global initial_delegator_spawn_n
-
-	# we are done if we've reached the desired n,
-	#   which we need to stop at because we are doing
-	#   a depth-first recursive evaluation
-	if polycube.n == limit_n:
-		return []
-
-	found_counts_by_n = [0]*22
-
-	# keep a Set of all evaluated positions so we don't repeat them
-	tried_pos = set(polycube.cubes.keys())
-
-	tried_canonicals = set()
-	canonical_orig = polycube.find_canonical_info()
-
-	# faster to declare a variable here, ahead of the loop?
-	#   or can the varaible just be declared and used inside the loop?
-	try_pos = 0
-
-	# for each cube, for each direction, add a cube
-	# create a list to iterate over because the dict will change
-	#   during recursion within the loop
-	for cube_pos in list(polycube.cubes.keys()):
-		for direction_cost in direction_costs:
-			try_pos = cube_pos + direction_cost
-			if try_pos in tried_pos:
-				continue
-			tried_pos.add(try_pos)
-
-			# create p+1
-			polycube.add(pos=try_pos)
-
-			# skip if we've already seen some p+1 with the same canonical representation
-			#   (comparing the bitwise int only)
-			canonical_try = polycube.find_canonical_info()
-			if canonical_try[0] in tried_canonicals:
-				polycube.remove(pos=try_pos)
-				continue
-
-			tried_canonicals.add(canonical_try[0])
-			# why are we doing this?
-			# this seems to never run, so commenting this out for now
-			#if try_pos in canonical_try[2]:
-			#	print("we are doing the thing")
-			#	tmp_add.copy().extend_single_thread(limit_n=limit_n)
-			#	# revert creating p+1 to try adding a cube at another position
-			#	tmp_add.remove(pos=try_pos)
-			#	continue
-
-			# remove the last of the ordered cubes in p+1
-			least_significant_cube_pos = enumerate(canonical_try[1]).__next__()[1]
-
-			# enumerate the set of "last cubes", and grab one, where
-			#   enumerate.__next__() returns a tuple of (index, value)
-			#   and thus we need to use the 1th element of the tuple
-			polycube.remove(pos=least_significant_cube_pos)
-
-			# if p+1-1 has the same canonical representation as p, count it as a new unique polycube
-			#   and continue recursion into that p+1
-			if polycube.find_canonical_info()[0] == canonical_orig[0]:
-				# replace the least significant cube we just removed
-				polycube.add(pos=least_significant_cube_pos)
-				# allow the found polycube to be counted elsewhere
-				found_counts_by_n[polycube.n] += 1
-				# the initial delegator submits jobs for threads,
-				#   but only if the found polycube has n=6
-				if initial_delegator and polycube.n == initial_delegator_spawn_n:
-					# increment the number of submitted+running threads
-					outstanding_threads += 1
-					submitted_future = global_pool_executor.submit(extend_with_thread_pool_nocopy, polycube=polycube.copy(), limit_n=limit_n, initial_delegator=False)
-					submitted_future.add_done_callback(extend_with_thread_pool_callback)
-
-				# otherwise, continue recursion within this thread
-				else:
-					further_counts = extend_with_thread_pool_nocopy(polycube=polycube, limit_n=limit_n, initial_delegator=initial_delegator)
-					for n,count in enumerate(further_counts):
-						found_counts_by_n[n] += count
-
-			# undo the temporary removal of the least significant cube,
-			#   but only if it's not the same as the cube we just tried
-			#   since we remove that one before going to the next iteration
-			#   of the loop
-			elif least_significant_cube_pos != try_pos:
-				polycube.add(pos=least_significant_cube_pos)
-
-			# revert creating p+1 to try adding a cube at another position
-			polycube.remove(pos=try_pos)
-
-	#if initial_delegator and polycube.n == 1:
-	#	print(f"initial delegator is done, {outstanding_threads=}")
-	return found_counts_by_n
+	if halt_pipe.poll():
+		# when abandoning, we may be deep into recursion, in which
+		#   case we should do nothing while bubbling back up until
+		#   we've reached a depth of 0
+		if depth > 0:
+			return []
+		# at a depth of 0, we need to record the intitial polycube
+		#   as unevaluated (to be resumed later)
+		elif delegate_at_n == 0:
+			response_queue.put((False, polycube.copy()))
+			return
+		# maybe indicate that the initial delegator worker was
+		#   halted with a special-case None value here
+		else:
+			response_queue.put((False, None))
+			return
+	else:
+		if depth == 0:
+			response_queue.put((True, found_counts_by_n))
+			return
+		else:
+			return found_counts_by_n
 
 def extend_single_thread(*, polycube, limit_n):
 	global direction_costs
@@ -568,17 +541,29 @@ class Polycube:
 		self.canonical_info = canonical
 		return canonical
 
-	def extend(self, *, limit_n):
-		global global_pool_executor
-		global n_counts
-		# use the concurrent version of this function if we have a pool_executor
-		if global_pool_executor is None:
-			extend_single_thread(polycube=self, limit_n=limit_n)
-		else:
-			# track that we're about to start/queue a thread
-			counts = extend_with_thread_pool(polycube=self, limit_n=limit_n, initial_delegator=True)
-			for n,count in enumerate(counts):
-				n_counts[n] += count
+
+last_count_increment_time = None
+last_interrupt_time = 0
+do_halt = False
+
+# trying to cleanly handle SIGINT (Ctrl+C) with the multiprocessing stuff
+#   has been a nightmare (we'll still use it for single-thread)
+# instead, we will periodically look for the presence of this file,
+#   and, if found, will start the clean shutdown procedure
+halt_file_path = Path(__file__).parent.joinpath("halt-signal.txt")
+
+def interrupt_handler(sig, frame):
+	global last_interrupt_time
+	now = time.time()
+	if now - last_interrupt_time < 1:
+		print('\nstopping...')
+		print_results()
+		# since this handler is only used for the single-threaded version,
+		#   we can stop immediately
+		sys.exit(0)
+	else:
+		last_interrupt_time = now
+		print_results()
 
 def print_results():
 	global n_counts
@@ -588,50 +573,153 @@ def print_results():
 			print(f'n = {n:>2}: {v}')
 
 if __name__ == "__main__":
+
 	arg_parser = argparse.ArgumentParser(\
 		description='Count the number of (rotationally) unique polycubes containing up to n cubes')
 	arg_parser.add_argument('n', metavar='<n>', type=int,
 		help='the number of cubes the largest counted polycube should contain')
 	arg_parser.add_argument('--threads', metavar='<threads>', type=int, required=False,
-		default=0, help='0 for single-threaded, or the maximum number of threads to spawn simultaneously (default=0)')
+		default=0, help='0 for single-threaded, or >1 for the maximum number of threads to spawn simultaneously (default=0)')
 	arg_parser.add_argument('--spawn-n', metavar='<spawn-n>', type=int, required=False,
 		default=7, help='the smallest polycubes for which each will spawn a thread, higher->more shorter-lived threads (default=7)')
 
 	args = arg_parser.parse_args()
-	if args.n < 0 or args.threads < 0 or args.spawn_n < 0:
+	if args.n < 0 or args.threads < 0 or args.threads == 1 or args.spawn_n < 0:
 		arg_parser.print_help()
 		sys.exit(1)
 
-	initial_delegator_spawn_n = args.spawn_n
-
 	start_time = time.perf_counter()
 	start_eta_time = time.time()
+	polycube = Polycube(create_initial_cube=True)
 	if args.threads == 0:
-		p = Polycube(create_initial_cube=True)
+		print(f"use Ctrl+C once to print current results, or twice to stop")
+		# for the single-threaded implementation, we can
+		#   cleanly handle SIGINT (Ctrl+C)
+		signal.signal(signal.SIGINT, interrupt_handler)
 		# enumerate all valid polycubes up to size limit_n
-		p.extend(limit_n=args.n)
+		#   in a single thread
+		extend_single_thread(polycube=polycube, limit_n=args.n)
 	else:
-		with concurrent.futures.ProcessPoolExecutor(max_workers=args.threads) as pool_executor:
-			global_pool_executor = pool_executor
-			p = Polycube(create_initial_cube=True)
-			n_counts[1] += 1
-			# enumerate all valid polycubes up to size limit_n
-			p.extend(limit_n=args.n)
-			# we have to busy wait here, inside this "with ... as pool_executor"
-			#   block, in order to keep the ThreadPoolExecutor alive
-			# while waiting, we can do useful things here like showing
-			#   useful timing/counts data
-			time.sleep(2.0)
-			while outstanding_threads > 0:
-				time_elapsed = time.time() - start_eta_time
-				seconds_per_thread = time_elapsed / completed_threads
-				seconds_remaining = timedelta(seconds=round(seconds_per_thread * outstanding_threads))
-				pct_complete = (float(completed_threads) * 100.0) / (float(completed_threads) + float(outstanding_threads))
-				total_seconds = round((seconds_per_thread * outstanding_threads) + time_elapsed)
-				total_seconds_remaining = timedelta(seconds=round(total_seconds))
-				print(f'    {round(pct_complete,4)}% complete, ETA: [{seconds_remaining}], total: [{total_seconds_remaining}], counting for n={args.n}: [{n_counts[args.n]}], outstanding threads: [{outstanding_threads}]       ', end='\r')
-				time.sleep(1.0)
-			print("outstanding_threads is empty")
+		compl_worker_jobs = 0
+		saved_worker_jobs = 0
+		total_worker_jobs = well_known_n_counts[args.spawn_n]
+		print(f"to halt early, create the file [{halt_file_path}]\n")
+		# the manager will provide queues and a pipe for communication
+		#   with the child processes
+		with Manager() as manager:
+			# the child processes will return both counts for fully-
+			#   evaluated Polycubes and also non-evaluated Polycubes
+			#   to write to disk for continuing later
+			response_queue = manager.Queue()
+			# these are the found canonical Polycubes of whatever
+			#   size that the child processes will evaluate
+			submit_queue = manager.Queue()
+
+			# the send and receive ends of the pipe for signalling
+			#  that an early halt has been requested
+			halt_pipe_recv, halt_pipe_send = Pipe(duplex=False)
+			# the send and receive ends of the pipe for signalling
+			#  to the workers to stop looking for jobs
+			done_pipe_recv, done_pipe_send = Pipe(duplex=False)
+
+			# initially spawn threads-1 worker threads, plus one
+			#   thread for the initial work delegator
+			delegator_proc = Process(target=delegate_extend, args=(polycube, args.n, halt_pipe_recv, submit_queue, response_queue, args.spawn_n))
+			delegator_proc.start()
+			processes = []
+			for i in range(0, args.threads-1):
+				p = Process(target=worker_extend_outer, args=(args.n, halt_pipe_recv, done_pipe_recv, submit_queue, response_queue))
+				processes.append(p)
+				p.start()
+			halted = False
+			not_impl_message = False
+			last_stats_and_halt = time.time()
+			while not halted or not submit_queue.empty() or not response_queue.empty():
+				# once the initial work delegator has finished,
+				#   spawn a new worker thread
+				if not halted and not delegator_proc.is_alive() and len(processes) < args.threads:
+					print("\ninitial delegator thread has finished, spawning a new worker thread")
+					# the initial delegator thread submits its results through
+					#   the same response_queue as the rest of the workers, but it shouldn't
+					#   be counted as a completed worker job
+					compl_worker_jobs -= 1
+					p = Process(target=worker_extend_outer, args=(args.n, halt_pipe_recv, done_pipe_recv, submit_queue, response_queue))
+					processes.append(p)
+					p.start()
+				# check for halt file
+				if not halted:
+					if halt_file_path.is_file():
+						print(f"\nfound halt file [{halt_file_path}], stopping...")
+						# signal to the threads that they should stop
+						halt_pipe_send.send(1)
+						halted = True
+				# check if everything has completed
+				if not halted and not delegator_proc.is_alive() and submit_queue.empty():
+					print(f"\nlooks like we have finished!  stopping...")
+					# signal to the threads that they should stop
+					done_pipe_send.send(1)
+					halted = True
+
+				# regardless of halt file, continue to process responses
+				#   sent by the workers (if any are currently available)
+				found_something = True
+				while found_something:
+					if time.time() - last_stats_and_halt > 1.0:
+						last_stats_and_halt = time.time()
+						# check for halt file
+						if not halted:
+							if halt_file_path.is_file():
+								print(f"\nfound halt file [{halt_file_path}], stopping...")
+								# signal to the threads that they should stop
+								halt_pipe_send.send(1)
+								halted = True
+						# print stats
+						if compl_worker_jobs > 0:
+							time_elapsed = time.time() - start_eta_time
+							seconds_per_thread = time_elapsed / float(compl_worker_jobs)
+							threads_remaining = float(total_worker_jobs - compl_worker_jobs)
+							seconds_remaining = timedelta(seconds=round(seconds_per_thread * threads_remaining))
+							pct_complete = (float(compl_worker_jobs) * 100.0) / float(total_worker_jobs)
+							total_seconds = round((seconds_per_thread * threads_remaining) + time_elapsed)
+							total_seconds_delta = timedelta(seconds=round(total_seconds))
+							print(f'    {round(pct_complete,4)}% complete, ETA:[{seconds_remaining}], total:[{total_seconds_delta}], counting for n={args.n}:[{n_counts[args.n]}], outstanding threads:[{total_worker_jobs}-{compl_worker_jobs}={round(threads_remaining)}]       ', end='\r')
+					try:
+						data = response_queue.get(block = True, timeout = 1.0)
+						# to send minimal data back and forth, for the 0th
+						#   item in the tuple we will use:
+						# True  - a finished array of counts
+						# False - an unfinished Polycube to write to disk
+						if data[0]:
+							for n,count in enumerate(data[1]):
+								n_counts[n] += count
+							last_count_increment_time = time.perf_counter()
+							compl_worker_jobs += 1
+						# these are the abandoned Polycubes, not yet evaluated,
+						#   that will be written to disk so they can be read and
+						#   resumed later
+						else:
+							if data[1] is None:
+								print("\nthe initial delegator worker was halted.  thus, we cannot resume from this point later and will not write any data to disk")
+							else:
+								# write the found polycube data (data[1]) to file
+								saved_worker_jobs += 1
+								if not not_impl_message:
+									not_impl_message = True
+									print("\nwriting unevaluated polycubes to disk is not implemented yet")
+					except QueueEmpty:
+						found_something = False
+				# might not need this sleep due to the above response_queue.get(timeout = 1.0)
+				time.sleep(1)
+			# might not need this block, because response_queue.empty() is checked
+			#   by the above block
+			#while not response_queue.empty():
+			#	resp = response_queue.get()
+			#	print(f"received response: {resp}")
+			# the workers should all be done by this point, but might as well .join() them
+			for p in processes:
+				p.join()
+		print(f"all threads have completed: {compl_worker_jobs=}, {saved_worker_jobs=} (compl+saved @n={args.spawn_n} should be {total_worker_jobs=})")
+
 	print_results()
 	if last_count_increment_time is None:
 		last_count_increment_time = time.perf_counter()
