@@ -2,10 +2,10 @@
 #
 
 import argparse
-from concurrent.futures import CancelledError, ProcessPoolExecutor
-from concurrent.futures.process import BrokenProcessPool
 from copy import deepcopy
-from datetime import timedelta
+from datetime import datetime, timedelta
+import gzip
+import json
 from multiprocessing import Manager, Pipe, Process
 from pathlib import Path
 from queue import Empty as QueueEmpty
@@ -568,29 +568,79 @@ def interrupt_handler(sig, frame):
 		last_interrupt_time = now
 		print_results()
 
-def print_results():
+def print_results(is_complete=True):
 	global n_counts
-	print(f'\n\nresults:')
+	print(f'\n\n{"" if is_complete else "partial "}results:')
 	for n,v in enumerate(n_counts):
 		if n > 0 and v > 0:
 			print(f'n = {n:>2}: {v}')
 
+def write_resume_file(n, spawn_n, polycubes, n_counts, total_elapsed_sec):
+	json_file_timestamp = datetime.isoformat(datetime.now(),timespec='seconds').replace(':', '').replace('-', '')
+	json_file = Path(__file__).parent.joinpath(f"halt-n{args.n}-{json_file_timestamp}.json.gz")
+	print(f"writing {len(polycubes_to_write_to_disk)} polycubes to [{json_file}]...")
+	json_content = {
+		'n': n,
+		'spawn_n': spawn_n,
+		'counts': n_counts,
+		'total_elapsed_sec': total_elapsed_sec,
+		'unevaluated_polycubes': polycubes
+	}
+	# thanks to https://stackoverflow.com/a/49535758/259456
+	#   for showing how to write gzip compressed content
+	#   to a file
+	# use 'xt' mode to open for writing text, failing if the file already exists
+	#   (going with 'wt' mode for now, to overwrite the file because
+	#   we may be saving hours of work and we don't want to just fail
+	#   if a file with the same timestamp already exists)
+	with gzip.open(json_file, 'wt', encoding="ascii") as f:
+		json.dump(json_content, f)
+	print("done writing to file")
+
+def read_resume_file(resume_file_path):
+	print(f"reading resume file [{resume_file_path}]...")
+	json_content = None
+	with gzip.open(resume_file_path, 'rt') as f:
+		json_content = json.loads(f.read())
+	print(f"done reading {len(json_content['unevaluated_polycubes'])} unevalutated polycubes from file")
+	return (json_content['n'], json_content['spawn_n'], json_content['counts'], json_content['total_elapsed_sec'], json_content['unevaluated_polycubes'])
+
 if __name__ == "__main__":
+
+	resume_file_path = None
+	polycubes_to_resume = []
 
 	arg_parser = argparse.ArgumentParser(\
 		description='Count the number of (rotationally) unique polycubes containing up to n cubes')
-	arg_parser.add_argument('n', metavar='<n>', type=int,
-		help='the number of cubes the largest counted polycube should contain')
-	arg_parser.add_argument('--threads', metavar='<threads>', type=int, required=False,
-		default=0, help='0 for single-threaded, or >1 for the maximum number of threads to spawn simultaneously (default=0)')
-	arg_parser.add_argument('--spawn-n', metavar='<spawn-n>', type=int, required=False,
-		default=7, help='the smallest polycubes for which each will spawn a thread, higher->more shorter-lived threads (default=7)')
+	arg_parser.add_argument('-n', metavar='<n>', type=int, required=False, default=-1,
+		help='the number of cubes the largest counted polycube should contain (>1)')
+	arg_parser.add_argument('--threads', metavar='<threads>', type=int, required=False, default=0,
+		help='0 for single-threaded, or >1 for the maximum number of threads to spawn simultaneously (default=0)')
+	arg_parser.add_argument('--spawn-n', metavar='<spawn-n>', type=int, required=False, default=7,
+		help='the smallest polycubes for which each will spawn a thread, higher->more shorter-lived threads (default=7)')
+	arg_parser.add_argument('--resume-from-file', metavar='<resume-file>', required=False,
+		help='a .json.gz file previously created by this script')
 
 	args = arg_parser.parse_args()
-	if args.n < 0 or args.threads < 0 or args.threads == 1 or args.spawn_n < 0:
+	if args.resume_from_file:
+		if args.threads < 2:
+			print("must use >1 thread if resuming from <resume_file>", file=sys.stderr)
+			arg_parser.print_help()
+			sys.exit(1)
+		resume_file_path = Path(args.resume_from_file)
+		if not resume_file_path.is_file():
+			print(f'<resume-file> [{resume_file_path}] does not exist')
+			sys.exit(1)
+	elif args.n < 2 or args.threads < 0 or args.threads == 1 or args.spawn_n < 0:
 		arg_parser.print_help()
 		sys.exit(1)
 
+	# load resume file content
+	previous_total_elapsed_sec = 0.0
+	if resume_file_path is not None:
+		args.n, args.spawn_n, n_counts, previous_total_elapsed_sec, polycubes_to_resume = read_resume_file(resume_file_path)
+
+	complete = False
 	start_time = time.perf_counter()
 	start_eta_time = time.time()
 	polycube = Polycube(create_initial_cube=True)
@@ -603,10 +653,11 @@ if __name__ == "__main__":
 		#   in a single thread
 		extend_single_thread(polycube=polycube, limit_n=args.n)
 	else:
-		compl_worker_jobs = 0
 		saved_worker_jobs = 0
 		total_worker_jobs = well_known_n_counts[args.spawn_n]
+		compl_worker_jobs = 0 if resume_file_path is None else total_worker_jobs - len(polycubes_to_resume)
 		print(f"to halt early, create the file [{halt_file_path}]\n")
+		polycubes_to_write_to_disk = []
 		# the manager will provide queues and a pipe for communication
 		#   with the child processes
 		with Manager() as manager:
@@ -625,22 +676,36 @@ if __name__ == "__main__":
 			#  to the workers to stop looking for jobs
 			done_pipe_recv, done_pipe_send = Pipe(duplex=False)
 
-			# initially spawn threads-1 worker threads, plus one
-			#   thread for the initial work delegator
-			delegator_proc = Process(target=delegate_extend, args=(polycube, args.n, halt_pipe_recv, submit_queue, response_queue, args.spawn_n))
-			delegator_proc.start()
+			initial_workers_to_spawn = args.threads
+			delegator_proc = None
+			# create polycubes if resuming, and enqueue them
+			if resume_file_path:
+				while len(polycubes_to_resume) > 0:
+					polycube = Polycube(create_initial_cube=False)
+					# consume the list of polycube positions data since
+					#   we don't need it to linger in memory after this
+					for cube_pos in polycubes_to_resume.pop():
+						polycube.add(pos=cube_pos)
+					submit_queue.put(polycube)
+				initial_workers_to_spawn = args.threads
+			else:
+				# initially spawn threads-1 worker threads, plus one
+				#   thread for the initial work delegator
+				initial_workers_to_spawn = args.threads - 1
+				n_counts[1] = 1
+				delegator_proc = Process(target=delegate_extend, args=(polycube, args.n, halt_pipe_recv, submit_queue, response_queue, args.spawn_n))
+				delegator_proc.start()
 			processes = []
-			for i in range(0, args.threads-1):
+			for i in range(0, initial_workers_to_spawn):
 				p = Process(target=worker_extend_outer, args=(args.n, halt_pipe_recv, done_pipe_recv, submit_queue, response_queue))
 				processes.append(p)
 				p.start()
 			halted = False
-			not_impl_message = False
 			last_stats_and_halt = time.time()
 			while not halted or not submit_queue.empty() or not response_queue.empty():
 				# once the initial work delegator has finished,
 				#   spawn a new worker thread
-				if not halted and not delegator_proc.is_alive() and len(processes) < args.threads:
+				if not halted and resume_file_path is None and not delegator_proc.is_alive() and len(processes) < args.threads:
 					print("\ninitial delegator thread has finished, spawning a new worker thread")
 					# the initial delegator thread submits its results through
 					#   the same response_queue as the rest of the workers, but it shouldn't
@@ -657,11 +722,12 @@ if __name__ == "__main__":
 						halt_pipe_send.send(1)
 						halted = True
 				# check if everything has completed
-				if not halted and not delegator_proc.is_alive() and submit_queue.empty():
+				if not halted and (delegator_proc is None or not delegator_proc.is_alive()) and submit_queue.empty():
 					print(f"\nlooks like we have finished!  stopping...")
 					# signal to the threads that they should stop
 					done_pipe_send.send(1)
 					halted = True
+					complete = True
 
 				# regardless of halt file, continue to process responses
 				#   sent by the workers (if any are currently available)
@@ -679,11 +745,11 @@ if __name__ == "__main__":
 						# print stats
 						if compl_worker_jobs > 0:
 							time_elapsed = time.time() - start_eta_time
-							seconds_per_thread = time_elapsed / float(compl_worker_jobs)
+							seconds_per_thread = (time_elapsed + previous_total_elapsed_sec) / float(compl_worker_jobs)
 							threads_remaining = float(total_worker_jobs - compl_worker_jobs)
 							seconds_remaining = timedelta(seconds=round(seconds_per_thread * threads_remaining))
 							pct_complete = (float(compl_worker_jobs) * 100.0) / float(total_worker_jobs)
-							total_seconds = round((seconds_per_thread * threads_remaining) + time_elapsed)
+							total_seconds = round((seconds_per_thread * threads_remaining) + time_elapsed + previous_total_elapsed_sec)
 							total_seconds_delta = timedelta(seconds=round(total_seconds))
 							print(f'    {round(pct_complete,4)}% complete, ETA:[{seconds_remaining}], total:[{total_seconds_delta}], counting for n={args.n}:[{n_counts[args.n]}], outstanding threads:[{total_worker_jobs}-{compl_worker_jobs}={round(threads_remaining)}]       ', end='\r')
 					try:
@@ -706,9 +772,7 @@ if __name__ == "__main__":
 							else:
 								# write the found polycube data (data[1]) to file
 								saved_worker_jobs += 1
-								if not not_impl_message:
-									not_impl_message = True
-									print("\nwriting unevaluated polycubes to disk is not implemented yet")
+								polycubes_to_write_to_disk.append(list(data[1].cubes.keys()))
 					except QueueEmpty:
 						found_something = False
 				# might not need this sleep due to the above response_queue.get(timeout = 1.0)
@@ -722,8 +786,21 @@ if __name__ == "__main__":
 			for p in processes:
 				p.join()
 		print(f"all threads have completed: {compl_worker_jobs=}, {saved_worker_jobs=} (compl+saved @n={args.spawn_n} should be {total_worker_jobs=})")
+		if len(polycubes_to_write_to_disk) > 0:
+			write_resume_file(
+				args.n,
+				args.spawn_n,
+				polycubes_to_write_to_disk,
+				n_counts,
+				previous_total_elapsed_sec + (last_count_increment_time - start_time)
+			)
 
-	print_results()
+
+	print_results(complete)
 	if last_count_increment_time is None:
 		last_count_increment_time = time.perf_counter()
-	print(f'elapsed seconds: {last_count_increment_time - start_time}')
+	if resume_file_path is None:
+		print(f'elapsed seconds: {last_count_increment_time - start_time}')
+	else:
+		total_seconds = previous_total_elapsed_sec + last_count_increment_time - start_time
+		print(f'elapsed seconds: {last_count_increment_time - start_time} + {previous_total_elapsed_sec} from resume file = {total_seconds} total seconds')
