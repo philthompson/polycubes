@@ -133,8 +133,6 @@ def worker_extend_outer(n, halt_pipe_recv, done_pipe_recv, submit_queue, respons
 	# wait for work to arrive if halt hasn't been signalled yet
 	#while not halted and not submit_queue.empty():
 	while not halted:
-		if not halted and (halt_pipe_recv.poll() or done_pipe_recv.poll()):
-			halted = True
 		try:
 			polycube = submit_queue.get(block = True, timeout = 5.0)
 			extend_with_thread_pool(
@@ -146,7 +144,8 @@ def worker_extend_outer(n, halt_pipe_recv, done_pipe_recv, submit_queue, respons
 				halt_pipe=halt_pipe_recv,
 				depth=0)
 		except QueueEmpty:
-			pass
+			if not halted and (halt_pipe_recv.poll() or done_pipe_recv.poll()):
+				halted = True
 	# after halt, drain the queue
 	found_something = True
 	while found_something:
@@ -180,27 +179,28 @@ def extend_with_thread_pool(*, polycube, limit_n, delegate_at_n, submit_queue, r
 	#   or can the varaible just be declared and used inside the loop?
 	try_pos = 0
 
+	# if halt has been signalled, abandon the evaluation
+	#   of this polycube
+	if halt_pipe.poll():
+		# when abandoning, we may be deep into recursion, in which
+		#   case we should do nothing while bubbling back up until
+		#   we've reached a depth of 0
+		if depth > 0:
+			return []
+		# at a depth of 0, we need to record the intitial polycube
+		#   as unevaluated (to be resumed later)
+		elif delegate_at_n == 0:
+			response_queue.put((False, polycube.copy()))
+			return
+		# maybe indicate that the initial delegator worker was
+		#   halted with a special-case None value here
+		else:
+			response_queue.put((False, None))
+			return
+
 	# for each cube, for each direction, add a cube
 	for cube_pos in polycube.cubes:
 		for direction_cost in direction_costs:
-			# if halt has been signalled, abandon the evaluation
-			#   of this polycube
-			if halt_pipe.poll():
-				# when abandoning, we may be deep into recursion, in which
-				#   case we should do nothing while bubbling back up until
-				#   we've reached a depth of 0
-				if depth > 0:
-					return []
-				# at a depth of 0, we need to record the intitial polycube
-				#   as unevaluated (to be resumed later)
-				elif delegate_at_n == 0:
-					response_queue.put((False, polycube.copy()))
-					return
-				# maybe indicate that the initial delegator worker was
-				#   halted with a special-case None value here
-				else:
-					response_queue.put((False, None))
-					return
 
 			try_pos = cube_pos + direction_cost
 			if try_pos in tried_pos:
@@ -551,6 +551,9 @@ do_halt = False
 # instead, we will periodically look for the presence of this file,
 #   and, if found, will start the clean shutdown procedure
 halt_file_path = Path(__file__).parent.joinpath("halt-signal.txt")
+if halt_file_path.exists():
+	print(f'found halt file [{halt_file_path}] already exists, stopping...')
+	sys.exit(0)
 
 def interrupt_handler(sig, frame):
 	global last_interrupt_time
