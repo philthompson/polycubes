@@ -27,12 +27,12 @@ https://github.com/mikepound/opencubes/tree/9ad224fd4f35b31d5b37d62fcbd1b871f9b9
 ## Running times
 
 Running times (in seconds) for single-threaded, **n=11**, on an M1 Mac mini:
-| python |  pypy |  commit | note |
-|   ---: |  ---: |  :---:  |      |
-| 1050.0 |       | 44f96a5 |      |
+| python |  pypy |  commit | note  |
+|   ---: |  ---: |  :---:  | :---: |
+| 1050.0 |       | 44f96a5 |       |
 |  768.5 | 284.0 | cb8a167 | copy the Polycube instances less often |
-|  752.4 | 275.5 | df2c5a0 |      |
-|  736.6 |       | 253a957 |      |
+|  752.4 | 275.5 | df2c5a0 |       |
+|  736.6 |       | 253a957 |       |
 
 Running times (in seconds) for 7 threads, **n=11**, on an M1 Mac mini:
 | python |  pypy |  commit | note  |
