@@ -3,7 +3,31 @@
 
 A python 3 implementation of a hashtable-less polycube enumerator.
 
-## Background
+### Running
+
+```
+python cubes.py --threads 4 -n 11
+```
+
+To halt (and save progress to a file):
+
+```
+touch halt-signal.txt
+```
+
+To resume from saved file:
+
+```
+python cubes.py --threads 4 --resume-from-file halt-n11-20231209T075457.json.gz
+```
+
+### File Size
+
+With the default `--spawn-n 8`, 6922 polycubes are used for spawning threads.  If all of those 6922 are all written to disk for resuming later, the file will be about 28kb in size.
+
+With `--spawn-n 10`, 346543 polycubes are used for spawning threads.  If all of those 346543 are all written to disk for resuming later, the file will be about 1.4mb in size.
+
+### Background
 
 See https://github.com/mikepound/opencubes for the original implementation and community-provided improvements from the Computerphile video at https://www.youtube.com/watch?v=g9n0a0644B4
 
@@ -24,7 +48,7 @@ See the original javascript implementation and README.md file at:
 
 https://github.com/mikepound/opencubes/tree/9ad224fd4f35b31d5b37d62fcbd1b871f9b9600c/javascript
 
-## Running times
+### Running times
 
 Running times (in seconds) for single-threaded, **n=11**, on an M1 Mac mini:
 | python |  pypy |  commit | note  |
