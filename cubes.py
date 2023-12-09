@@ -95,10 +95,10 @@ well_known_n_counts = [0, 1, 1, 2, 8, 29, 166, 1023, 6922, 48311, 346543, 252252
 #   run simultaneously:
 #   n | 4 |  5 |  6  |   7  |   8  |   9   |   10
 #   # | 8 | 29 | 166 | 1023 | 6922 | 48311 | 346543
-initial_delegator_spawn_n = 6
+initial_delegator_spawn_n = 8
 
 # count of unique polycubes of size n
-n_counts = [0]*22
+n_counts = [0]*23
 
 class Cube:
 	def __init__(self, *, pos):
@@ -166,7 +166,7 @@ def extend_with_thread_pool(*, polycube, limit_n, delegate_at_n, submit_queue, r
 	if polycube.n == limit_n:
 		return []
 
-	found_counts_by_n = [0]*22
+	found_counts_by_n = [0]*23
 
 	# keep a Set of all evaluated positions so we don't repeat them
 	tried_pos = set(polycube.cubes.keys())
@@ -616,7 +616,7 @@ if __name__ == "__main__":
 		help='the number of cubes the largest counted polycube should contain (>1)')
 	arg_parser.add_argument('--threads', metavar='<threads>', type=int, required=False, default=0,
 		help='0 for single-threaded, or >1 for the maximum number of threads to spawn simultaneously (default=0)')
-	arg_parser.add_argument('--spawn-n', metavar='<spawn-n>', type=int, required=False, default=7,
+	arg_parser.add_argument('--spawn-n', metavar='<spawn-n>', type=int, required=False, default=8,
 		help='the smallest polycubes for which each will spawn a thread, higher->more shorter-lived threads (default=7)')
 	arg_parser.add_argument('--resume-from-file', metavar='<resume-file>', required=False,
 		help='a .json.gz file previously created by this script')
