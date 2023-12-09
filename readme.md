@@ -1,7 +1,9 @@
 
 ## Polycubes
 
-A python 3 implementation of a hashtable-less polycube enumerator.
+A python 3 implementation of a hashtable-less polycube enumerator using the method described by presseyt (see link below).  This implementation can run on multiple CPU cores and can be halted and resumed.
+
+This can theoretically be run across multiple machines (sum their final counts to find the final answer) even by hand after splitting its written `.json.gz` file into multiple files.  (It's not worth pursuing this though with this python implementation!)
 
 ### Running
 
@@ -31,18 +33,18 @@ With `--spawn-n 10`, 346543 polycubes are used for spawning threads.  If all of 
 
 See https://github.com/mikepound/opencubes for the original implementation and community-provided improvements from the Computerphile video at https://www.youtube.com/watch?v=g9n0a0644B4
 
-Uses a method defined by GitHub user "presseyt" to find a "canonical" representation of a cube.
+Uses a method defined by GitHub user "presseyt" to find a "canonical" representation of a cube.  The "canonical" representation of a cube is rotation-independent.
 
-The "canonical" reporesentation of a cube is rotation-independent.
+This method doesn't require a hashtable to store all seen unique polycubes: when we try to add a new `n+1`th cube to a polycube of size `n`, we only count it as a unique polycube if removing the "least significant" cube (according to its new canonical representation) from that `n+1` cube leaves us with the canonical cube of size `n`.
 
-This method avoids using a hashtable to store all seen unique polycubes: when we try to add a new `n+1`th cube to a polycube, we only count that as a unique polycube of size `n+1` if removing the "least significant" cube from that `n+1` cube leaves us with the canonical cube of size `n`.
+When we find a new canonical polycube of size `n+1`, we proceed and evaluate that new larger polycube and all its larger decendants.  By giving a set of threads/cores/machines their own separate list of polycubes, they can independently count their polycubes' decendant shapes without exchanging any information with each other.  At the end of computation, we sum all their findings to find the number of unique polycubes of the target size.
 
 Much of this code is a python 3 port of their javascript implementation, but there are a few changes, including:
 
 - using a single integer to represent the encoding of the polycube's adjacency graph
 - using a recursive depth-first traversal to build the adjacency graph
 - using the full 6 bits for each cube in the adjacency graph (not truncating once all cubes are represented)
-- a ProcessPoolExecutor implementation that divides the work among multiple processes (threads)
+- a `Process` implementation that divides the work among multiple processes (CPU cores)
 
 See the original javascript implementation and README.md file at:
 
