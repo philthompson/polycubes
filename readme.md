@@ -27,19 +27,21 @@ https://github.com/mikepound/opencubes/tree/9ad224fd4f35b31d5b37d62fcbd1b871f9b9
 ## Running times
 
 Running times (in seconds) for single-threaded, **n=11**, on an M1 Mac mini:
-| python |  pypy |  commit |
-|   ---: |  ---: |  :---:  |
-| 1050.0 |       | 44f96a5 |
-|  768.5 | 284.0 | cb8a167 |
-|  752.4 | 275.5 | df2c5a0 |
-|  736.6 |       | 253a957 |
+| python |  pypy |  commit | note |
+|   ---: |  ---: |  :---:  |      |
+| 1050.0 |       | 44f96a5 |      |
+|  768.5 | 284.0 | cb8a167 | copy the Polycube instances less often |
+|  752.4 | 275.5 | df2c5a0 |      |
+|  736.6 |       | 253a957 |      |
 
 Running times (in seconds) for 7 threads, **n=11**, on an M1 Mac mini:
-| python |  pypy |  commit |
-|   ---: |  ---: |  :---:  |
-| 830.8  | 638.8 | cb8a167 |
-|        | 702.0 | 1d0b809 |
-| 914.7  | 671.5 | 6273cbd |
-| 758.6  | 306.0 | d1a6a62 |
-| 175.0  |  73.5 | 00ab2cf |
-| 171.4  |  70.5 | 253a957 |
+| python |  pypy |  commit | note  |
+|   ---: |  ---: |  :---:  | :---: |
+| 830.8  | 638.8 | cb8a167 |       |
+|        | 702.0 | 1d0b809 |       |
+| 914.7  | 671.5 | 6273cbd |       |
+| 758.6  | 306.0 | d1a6a62 |       |
+| 175.0  |  73.5 | 00ab2cf | Use ProcessPoolExecutor to acutally run on >1 CPU |
+| 171.4  |  70.5 | 253a957 |       |
+| 309.1  | 170.4 | 9f94cd2 | graceful halt refactor |
+| 188.8  |  90.3 | 59ec0e5 | move `Pipe.poll()` out of loops |
