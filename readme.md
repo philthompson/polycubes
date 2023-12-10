@@ -52,16 +52,17 @@ https://github.com/mikepound/opencubes/tree/9ad224fd4f35b31d5b37d62fcbd1b871f9b9
 
 ### Running times
 
-Running times (in seconds) for single-threaded, **n=11**, on an M1 Mac mini:
-| python |  pypy |  commit | note  |
+Running times (in seconds) for ` --threads 0 -n 11` on an M1 Mac mini:
+| cpython |  pypy |  commit | note  |
 |   ---: |  ---: |  :---:  | :---: |
 | 1050.0 |       | 44f96a5 |       |
 |  768.5 | 284.0 | cb8a167 | copy the Polycube instances less often |
 |  752.4 | 275.5 | df2c5a0 |       |
-|  736.6 |       | 253a957 |       |
+|  736.6 | 274.3 | 253a957 |       |
+|  522.3 | 172.9 | f39b559 | abandon inferior encodings early |
 
-Running times (in seconds) for 7 threads, **n=11**, on an M1 Mac mini:
-| python |  pypy |  commit | note  |
+Running times (in seconds) for `--threads 7 --spawn-n 7 -n 11` on an M1 Mac mini:
+| cpython |  pypy |  commit | note  |
 |   ---: |  ---: |  :---:  | :---: |
 | 830.8  | 638.8 | cb8a167 |       |
 |        | 702.0 | 1d0b809 |       |
@@ -71,3 +72,4 @@ Running times (in seconds) for 7 threads, **n=11**, on an M1 Mac mini:
 | 171.4  |  70.5 | 253a957 |       |
 | 309.1  | 170.4 | 9f94cd2 | graceful halt refactor |
 | 188.8  |  90.3 | 59ec0e5 | move `Pipe.poll()` out of loops |
+| 138.3  |  72.0 | f39b559 | abandon inferior encodings early |
