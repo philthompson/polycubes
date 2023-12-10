@@ -467,10 +467,6 @@ class Polycube:
 		global maximum_rotated_cube_values
 		return sorted([maximum_rotated_cube_values[cube.enc] for cube in self.cubes.values()])
 
-	def truncate_redundant_cubes(self, *, ordered_cubes, rotation):
-		# for now, don't truncate anything
-		return ordered_cubes
-
 	def make_encoding_recursive(self, *, start_cube_pos, rotation, included_cube_pos):
 		ordered_cubes = [self.cubes[start_cube_pos]]
 		included_cube_pos.add(start_cube_pos)
@@ -490,13 +486,8 @@ class Polycube:
 			rotation=rotations[rotations_index], \
 			included_cube_pos=set() \
 		)
-		# TODO: going in rotation-order, create the int encoding
-		#         and stop as soon as we've processed enough cubes
-		#         to have at least one '1' bit for each cube in
-		#         the polycube (but this doesn't actually seem
-		#         necesary... may be faster to just not do this)
-		encoding_cubes = self.truncate_redundant_cubes(ordered_cubes=ordered_cubes, rotation=rotations[rotations_index])
-		encoding = self.ordered_cubes_to_int(ordered_cubes=encoding_cubes, rotations_index=rotations_index)
+		encoding = self.ordered_cubes_to_int(ordered_cubes=ordered_cubes, rotations_index=rotations_index)
+
 		# return the encoding and the position of the last cube
 		#   in the encoding order
 		#encoding_and_last_pos = (encoding, ordered_cubes[-1].pos)
@@ -506,7 +497,7 @@ class Polycube:
 	def ordered_cubes_to_int(self, *, ordered_cubes, rotations_index):
 		global rotation_table
 		encoding = 0
-		for i,cube in enumerate(ordered_cubes):
+		for cube in ordered_cubes:
 			encoding = encoding << 6
 			encoding += rotation_table[cube.enc][rotations_index]
 		return encoding
