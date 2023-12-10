@@ -494,6 +494,24 @@ class Polycube:
 		#print(f'for {self.n=}, encoding: {int_to_bit_list_unbound(encoding_and_last_pos[0])}')
 		return (encoding, ordered_cubes[-1].pos)
 
+	# TODO for future faster port to rust, do loop unrolling here:
+	# l = len(ordered_cubes)
+	# if l == 1:
+	#   return rotation_table[ordered_cubes[0].enc][rotations_index]
+	# elif l == 2:
+	#   return
+	#     rotation_table[ordered_cubes[0].enc][rotations_index] << 6) |
+	#     (rotation_table[ordered_cubes[1].enc][rotations_index]
+	# elif l == 3:
+	#   return
+	#     (rotation_table[ordered_cubes[0].enc][rotations_index] << 12) |
+	#     (rotation_table[ordered_cubes[1].enc][rotations_index] << 6) |
+	#     rotation_table[ordered_cubes[2].enc][rotations_index]
+	# ...
+	# elif l == 22:
+	#   return ...
+	# else:
+	#   throw Exception("int bitwise shift concatenation not implemented for this many cubes")
 	def ordered_cubes_to_int(self, *, ordered_cubes, rotations_index):
 		global rotation_table
 		encoding = 0
