@@ -100,6 +100,9 @@ initial_delegator_spawn_n = 8
 # count of unique polycubes of size n
 n_counts = [0]*23
 
+class AbandonEncoding(Exception):
+    pass
+
 class Cube:
 	def __init__(self, *, pos):
 		# position in the polycube defined as (x + 100y + 10,000z)
@@ -467,58 +470,45 @@ class Polycube:
 		global maximum_rotated_cube_values
 		return sorted([maximum_rotated_cube_values[cube.enc] for cube in self.cubes.values()])
 
-	def make_encoding_recursive(self, *, start_cube_pos, rotation, included_cube_pos):
+	def make_encoding_recursive(self, *, start_cube_pos, rotation, included_cube_pos, best_encoding, rotations_index, offset, encoding):
+		global rotation_table
+		encoding = (encoding << 6) + rotation_table[self.cubes[start_cube_pos].enc][rotations_index]
+		#print(f"{self.n=},{offset=}: new enc {int_to_bit_list_unbound(encoding)}")
+		if encoding < (best_encoding >> (offset * 6)):
+			#print(f"{self.n=},{offset=}:\n    best enc {int_to_bit_list_unbound(best_encoding >> (offset * 6))} >\n     new enc {int_to_bit_list_unbound(encoding)}")
+			raise AbandonEncoding
 		ordered_cubes = [self.cubes[start_cube_pos]]
 		included_cube_pos.add(start_cube_pos)
 		for direction in rotation:
 			neighbor = self.cubes[start_cube_pos].neighbors[direction]
 			if neighbor is None or neighbor.pos in included_cube_pos:
 				continue
-			ordered_cubes += self.make_encoding_recursive(start_cube_pos=neighbor.pos, rotation=rotation, included_cube_pos=included_cube_pos)
-		return ordered_cubes
+			cubes, encoding, offset = self.make_encoding_recursive(
+				start_cube_pos=neighbor.pos,
+				rotation=rotation,
+				included_cube_pos=included_cube_pos,
+				best_encoding=best_encoding,
+				rotations_index=rotations_index,
+				offset=offset-1,
+				encoding=encoding
+			)
+			ordered_cubes += cubes
+		return (ordered_cubes, encoding, offset)
 
-	def make_encoding(self, *, start_cube_pos, rotations_index):
+	def make_encoding(self, *, start_cube_pos, rotations_index, best_encoding):
 		global rotations
 		# uses a recursive depth-first encoding of all cubes, using
 		#   the provided rotation's order to traverse the cubes
-		ordered_cubes = self.make_encoding_recursive( \
-			start_cube_pos=start_cube_pos, \
-			rotation=rotations[rotations_index], \
-			included_cube_pos=set() \
+		ordered_cubes, encoding, _ = self.make_encoding_recursive(
+			start_cube_pos=start_cube_pos,
+			rotation=rotations[rotations_index],
+			included_cube_pos=set(),
+			best_encoding=best_encoding,
+			rotations_index=rotations_index,
+			offset=self.n-1, # number of 6-bit shifts from the right, where the last cube has an offset of 0
+			encoding=0
 		)
-		encoding = self.ordered_cubes_to_int(ordered_cubes=ordered_cubes, rotations_index=rotations_index)
-
-		# return the encoding and the position of the last cube
-		#   in the encoding order
-		#encoding_and_last_pos = (encoding, ordered_cubes[-1].pos)
-		#print(f'for {self.n=}, encoding: {int_to_bit_list_unbound(encoding_and_last_pos[0])}')
 		return (encoding, ordered_cubes[-1].pos)
-
-	# TODO for future faster port to rust, do loop unrolling here:
-	# l = len(ordered_cubes)
-	# if l == 1:
-	#   return rotation_table[ordered_cubes[0].enc][rotations_index]
-	# elif l == 2:
-	#   return
-	#     rotation_table[ordered_cubes[0].enc][rotations_index] << 6) |
-	#     (rotation_table[ordered_cubes[1].enc][rotations_index]
-	# elif l == 3:
-	#   return
-	#     (rotation_table[ordered_cubes[0].enc][rotations_index] << 12) |
-	#     (rotation_table[ordered_cubes[1].enc][rotations_index] << 6) |
-	#     rotation_table[ordered_cubes[2].enc][rotations_index]
-	# ...
-	# elif l == 22:
-	#   return ...
-	# else:
-	#   throw Exception("int bitwise shift concatenation not implemented for this many cubes")
-	def ordered_cubes_to_int(self, *, ordered_cubes, rotations_index):
-		global rotation_table
-		encoding = 0
-		for cube in ordered_cubes:
-			encoding = encoding << 6
-			encoding += rotation_table[cube.enc][rotations_index]
-		return encoding
 
 	def are_canonical_infos_equal(self, a, b):
 		# we can just compare the encoded int values, so we don't
@@ -533,20 +523,25 @@ class Polycube:
 		maximum_rotated_values_of_cubes = self.find_maximum_cube_values()
 		max_rotated_value_of_any_cube = maximum_rotated_values_of_cubes[-1]
 		canonical = [0, set(), maximum_rotated_values_of_cubes]
+		best_encoding = 0
 		encoding_diff = 0
 		for cube in self.cubes.values():
 			# there could be more than one cube with the maximum rotated value
 			if maximum_rotated_cube_values[cube.enc] == max_rotated_value_of_any_cube:
 				# use all rotations that give this cube its maximum value
 				for rotations_index in maximum_cube_rotation_indices[cube.enc]:
-					encoded_polycube = self.make_encoding(start_cube_pos=cube.pos, rotations_index=rotations_index)
-					encoding_diff = encoded_polycube[0] - canonical[0]
-					if encoding_diff > 0:
-						canonical[0] = encoded_polycube[0]
-						canonical[1].clear()
-						canonical[1].add(encoded_polycube[1])
-					elif encoding_diff == 0:
-						canonical[1].add(encoded_polycube[1])
+					try:
+						encoded_polycube = self.make_encoding(start_cube_pos=cube.pos, rotations_index=rotations_index, best_encoding=best_encoding)
+						encoding_diff = encoded_polycube[0] - canonical[0]
+						if encoding_diff > 0:
+							canonical[0] = encoded_polycube[0]
+							canonical[1].clear()
+							canonical[1].add(encoded_polycube[1])
+							best_encoding = encoded_polycube[0]
+						elif encoding_diff == 0:
+							canonical[1].add(encoded_polycube[1])
+					except AbandonEncoding:
+						continue
 		self.canonical_info = canonical
 		return canonical
 
