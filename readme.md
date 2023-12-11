@@ -52,7 +52,7 @@ https://github.com/mikepound/opencubes/tree/9ad224fd4f35b31d5b37d62fcbd1b871f9b9
 
 ### Running times
 
-Running times (in seconds) for ` --threads 0 -n 11` on an M1 Mac mini:
+Running times (in seconds) for `--threads 0 -n 11` on an M1 Mac mini:
 | cpython |  pypy |  commit | note  |
 |   ---: |  ---: |  :---:  | :---: |
 | 1050.0 |       | 44f96a5 |       |
@@ -73,3 +73,4 @@ Running times (in seconds) for `--threads 7 --spawn-n 7 -n 11` on an M1 Mac mini
 | 309.1  | 170.4 | 9f94cd2 | graceful halt refactor |
 | 188.8  |  90.3 | 59ec0e5 | move `Pipe.poll()` out of loops |
 | 138.3  |  72.0 | f39b559 | abandon inferior encodings early |
+| 123.7  |  55.0 |         | probabilistic halt check |
