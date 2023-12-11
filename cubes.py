@@ -9,6 +9,7 @@ import json
 from multiprocessing import Manager, Pipe, Process
 from pathlib import Path
 from queue import Empty as QueueEmpty
+import random
 import signal
 import sys
 import time
@@ -103,6 +104,9 @@ n_counts = [0]*23
 class AbandonEncoding(Exception):
     pass
 
+class HaltSignal(Exception):
+	pass
+
 class Cube:
 	def __init__(self, *, pos):
 		# position in the polycube defined as (x + 100y + 10,000z)
@@ -121,14 +125,19 @@ class Cube:
 
 # the initial delegator worker begins here
 def delegate_extend(polycube, n, halt_pipe_recv, submit_queue, response_queue, spawn_n):
-	extend_with_thread_pool(
-		polycube=polycube,
-		limit_n=n,
-		delegate_at_n=spawn_n,
-		submit_queue=submit_queue,
-		response_queue=response_queue,
-		halt_pipe=halt_pipe_recv,
-		depth=0)
+	try:
+		extend_with_thread_pool(
+			polycube=polycube,
+			limit_n=n,
+			delegate_at_n=spawn_n,
+			submit_queue=submit_queue,
+			response_queue=response_queue,
+			halt_pipe=halt_pipe_recv,
+			depth=0)
+	except HaltSignal:
+		# maybe indicate that the initial delegator worker was
+		#   halted with a special-case None value here
+		response_queue.put((False, None))
 
 # the regular workers begin here
 def worker_extend_outer(n, halt_pipe_recv, done_pipe_recv, submit_queue, response_queue):
@@ -137,7 +146,7 @@ def worker_extend_outer(n, halt_pipe_recv, done_pipe_recv, submit_queue, respons
 	#while not halted and not submit_queue.empty():
 	while not halted:
 		try:
-			polycube = submit_queue.get(block = True, timeout = 5.0)
+			polycube = submit_queue.get(block = True, timeout = 1.0)
 			extend_with_thread_pool(
 				polycube=polycube,
 				limit_n=n,
@@ -149,11 +158,17 @@ def worker_extend_outer(n, halt_pipe_recv, done_pipe_recv, submit_queue, respons
 		except QueueEmpty:
 			if not halted and (halt_pipe_recv.poll() or done_pipe_recv.poll()):
 				halted = True
+		except HaltSignal:
+			# we need to record the intitial polycube as unevaluated
+			#   (to be resumed later)
+			response_queue.put((False, polycube.copy()))
+			halted = True
+
 	# after halt, drain the queue
 	found_something = True
 	while found_something:
 		try:
-			polycube = submit_queue.get(block = True, timeout = 5.0)
+			polycube = submit_queue.get(block = True, timeout = 1.0)
 			# put a message here to indicate that this Polycube is
 			#   unevaluated
 			response_queue.put((False, polycube))
@@ -184,22 +199,12 @@ def extend_with_thread_pool(*, polycube, limit_n, delegate_at_n, submit_queue, r
 
 	# if halt has been signalled, abandon the evaluation
 	#   of this polycube
-	if halt_pipe.poll():
-		# when abandoning, we may be deep into recursion, in which
-		#   case we should do nothing while bubbling back up until
-		#   we've reached a depth of 0
-		if depth > 0:
-			return []
-		# at a depth of 0, we need to record the intitial polycube
-		#   as unevaluated (to be resumed later)
-		elif delegate_at_n == 0:
-			response_queue.put((False, polycube.copy()))
-			return
-		# maybe indicate that the initial delegator worker was
-		#   halted with a special-case None value here
-		else:
-			response_queue.put((False, None))
-			return
+	# since this function is run many many times by each process/thread,
+	#   we can greatly reduce use of Pipe.poll() and increase per-
+	#   process CPU utilization from ~90% to ~98% (at least on my
+	#   machine) by only checking for halt every 1000th iteration
+	if random.randrange(0, 1000) == 0 and halt_pipe.poll():
+		raise HaltSignal
 
 	# for each cube, for each direction, add a cube
 	for cube_pos in polycube.cubes:
@@ -274,28 +279,11 @@ def extend_with_thread_pool(*, polycube, limit_n, delegate_at_n, submit_queue, r
 			# revert creating p+1 to try adding a cube at another position
 			tmp_add.remove(pos=try_pos)
 
-	if halt_pipe.poll():
-		# when abandoning, we may be deep into recursion, in which
-		#   case we should do nothing while bubbling back up until
-		#   we've reached a depth of 0
-		if depth > 0:
-			return []
-		# at a depth of 0, we need to record the intitial polycube
-		#   as unevaluated (to be resumed later)
-		elif delegate_at_n == 0:
-			response_queue.put((False, polycube.copy()))
-			return
-		# maybe indicate that the initial delegator worker was
-		#   halted with a special-case None value here
-		else:
-			response_queue.put((False, None))
-			return
+	if depth == 0:
+		response_queue.put((True, found_counts_by_n))
+		return
 	else:
-		if depth == 0:
-			response_queue.put((True, found_counts_by_n))
-			return
-		else:
-			return found_counts_by_n
+		return found_counts_by_n
 
 def extend_single_thread(*, polycube, limit_n):
 	global direction_costs
