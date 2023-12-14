@@ -50,7 +50,7 @@ See the original javascript implementation and README.md file at:
 
 https://github.com/mikepound/opencubes/tree/9ad224fd4f35b31d5b37d62fcbd1b871f9b9600c/javascript
 
-### Running times
+### Python Running times
 
 Running times (in seconds) for `--threads 0 -n 11` on an M1 Mac mini:
 | cpython |  pypy |  commit | note  |
@@ -74,3 +74,15 @@ Running times (in seconds) for `--threads 7 --spawn-n 7 -n 11` on an M1 Mac mini
 | 188.8  |  90.3 | 59ec0e5 | move `Pipe.poll()` out of loops |
 | 138.3  |  72.0 | f39b559 | abandon inferior encodings early |
 | 123.7  |  55.0 |         | probabilistic halt check |
+
+### Rust Running Times
+
+<!-- cargo +nightly-aarch64-apple-darwin build --release -->
+<!-- cargo   +stable-x86_64-apple-darwin build --release -->
+<!-- ./target/release/cubes-rust --threads 0 -n 11       -->
+
+Running times (in seconds) for `--threads 0 -n 11` on an M1 Mac mini:
+| x86_64 | aarch64 |  commit | note  |
+|   ---: |    ---: |  :---:  | :---: |
+|  281.1 |   152.7 | 792714c | ported from python |
+|  207.2 |   109.2 |         | changed HashMap to BTreeMap |
