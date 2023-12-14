@@ -1,7 +1,6 @@
 
 use std::collections::BTreeSet;
 use std::collections::BTreeMap;
-use std::collections::HashSet;
 use std::env;
 use std::path::PathBuf;
 use std::process::exit;
@@ -449,7 +448,7 @@ impl Polycube {
 			&self,
 			start_cube_pos: isize,
 			rotation: [u8; 6],
-			included_cube_pos: &mut HashSet<isize>,
+			included_cube_pos: &mut BTreeSet<isize>,
 			best_encoding: u128,
 			rotations_index: usize,
 			mut offset: u8,
@@ -498,7 +497,7 @@ impl Polycube {
 	}
 
 	pub fn make_encoding(&self, start_cube_pos: isize, rotations_index: usize, best_encoding: u128) -> Option<(u128, isize)> {
-		let mut included_cube_pos: HashSet<isize> = HashSet::new();
+		let mut included_cube_pos: BTreeSet<isize> = BTreeSet::new();
 		// uses a recursive depth-first encoding of all cubes, using
 		//   the provided rotation's order to traverse the cubes
 		match self.make_encoding_recursive(
@@ -580,9 +579,9 @@ pub fn extend_single_thread(polycube: &mut Polycube, limit_n: u8, depth: usize) 
 	}
 
 	// keep a Set of all evaluated positions so we don't repeat them
-	let mut tried_pos: HashSet<isize> = HashSet::new();
+	let mut tried_pos: BTreeSet<isize> = BTreeSet::new();
 
-	let mut tried_canonicals: HashSet<u128> = HashSet::new();
+	let mut tried_canonicals: BTreeSet<u128> = BTreeSet::new();
 
 	// i'd like to not clone this, but that might not be possible
 	let canonical_orig: CanonicalInfo = polycube.find_canonical_info().clone();
