@@ -197,12 +197,10 @@ pub struct Polycube {
 	// number of cubes in this polycube
 	n: u8,
 	canonical_info: Option<CanonicalInfo>,
-	// keys - positions of cubes in this polycube
-	// vals - neighbor encoding for the cube at that position
-	enc_by_cube: BTreeMap<isize, u8>,
-	// keys - positions of cubes in this polycube
-	// vals - neighbors of the cube at that position in DIRECTIONS order
-	neighbors_by_cube: BTreeMap<isize, [Option<isize>; 6]>
+	// keys     - positions of cubes in this polycube
+	// vals 0-5 - neighbors of the cube at that position in DIRECTIONS order
+	// val  6   - neighbor encoding for the cube at that position
+	cube_info_by_pos: BTreeMap<isize, [Option<isize>; 7]>
 }
 
 impl Polycube {
@@ -212,16 +210,14 @@ impl Polycube {
 			Polycube {
 				n: 1,
 				canonical_info: None,
-				enc_by_cube: BTreeMap::from([(0, 0)]),
-				neighbors_by_cube: BTreeMap::from([(0, [None, None, None, None, None, None])])
+				cube_info_by_pos: BTreeMap::from([(0, [None, None, None, None, None, None, Some(0)])])
 			}
 		// intialize with no cubes
 		} else {
 			Polycube {
 				n: 0,
 				canonical_info: None,
-				enc_by_cube: BTreeMap::new(),
-				neighbors_by_cube: BTreeMap::new()
+				cube_info_by_pos: BTreeMap::new()
 			}
 		}
 	}
@@ -237,24 +233,22 @@ impl Polycube {
 						//max_cube_values: canonical_info.max_cube_values.clone()
 						max_cube_value: canonical_info.max_cube_value
 					}),
-					enc_by_cube: self.enc_by_cube.clone(),
-					neighbors_by_cube: self.neighbors_by_cube.clone()
+					cube_info_by_pos: self.cube_info_by_pos.clone()
 				}
 			}
 			None => {
 				Polycube {
 					n: self.n,
 					canonical_info: None,
-					enc_by_cube: self.enc_by_cube.clone(),
-					neighbors_by_cube: self.neighbors_by_cube.clone()
+					cube_info_by_pos: self.cube_info_by_pos.clone()
 				}
 			}
 		}
 	}
 
 	pub fn add(&mut self, pos: isize) {
-		let mut new_enc: u8 = 0;
-		let mut new_neighbors: [Option<isize>; 6] = [None, None, None, None, None, None];
+		let mut new_enc: isize = 0;
+		let mut new_info: [Option<isize>; 7] = [None, None, None, None, None, None, Some(0)];
 
 		// update each of our cube's enc values for the default
 		//   rotation of [0,1,2,3,4,5]
@@ -263,9 +257,9 @@ impl Polycube {
 			// neighbor cube position in the direction
 			let neighbor_pos = pos + DIRECTION_COSTS[*direction];
 			// if there is no neightbor cube in this direction, continue to next direction
-			match self.enc_by_cube.get(&neighbor_pos) {
-				Some(neighbor_enc) => {
-					new_neighbors[*direction] = Some(neighbor_pos);
+			match self.cube_info_by_pos.get_mut(&neighbor_pos) {
+				Some(neighbor_info) => {
+					new_info[*direction] = Some(neighbor_pos);
 					// we use rotation of [0,1,2,3,4,5] where the '0'
 					//   direction is -x and is the most significant bit
 					//   in each cube's .enc value, so we need '0' to
@@ -274,50 +268,52 @@ impl Polycube {
 					// use XOR to flip between each direction and its opposite
 					//   to set the neighbor's neighbor to the added cube
 					//   (0<->1, 2<->3, 4<->5)
-					self.neighbors_by_cube.get_mut(&neighbor_pos).unwrap()[direction ^ 1] = Some(pos);
+					neighbor_info[direction ^ 1] = Some(pos);
 					// we use rotation of [0,1,2,3,4,5] where the '0'
 					//   direction is -x and is the most significant bit
 					//   in each cube's .enc value, so we need '0' to
 					//   cause a left shift by 5 bits (and here we use
 					//   XOR to flip to the opposite direction)
-					self.enc_by_cube.insert(neighbor_pos, neighbor_enc | (1 << ((5-direction) ^ 1)));
+					neighbor_info[6] = Some(neighbor_info[6].unwrap() | (1 << ((5-direction) ^ 1)));
 				}
 				None => {}
 			}
 		}
 		// lastly, insert the new cube's encoded neighbors into our map
-		self.enc_by_cube.insert(pos, new_enc);
-		self.neighbors_by_cube.insert(pos, new_neighbors);
+		new_info[6] = Some(new_enc);
+		self.cube_info_by_pos.insert(pos, new_info);
 		self.n += 1;
 		self.canonical_info = None;
 	}
 
 	pub fn remove(&mut self, pos: isize) {
+		// first remove the cube's data from our map
+		let cube_info = self.cube_info_by_pos.remove(&pos).unwrap();
 		// remove this cube from each of its neighbors
-		// create a Vec since we can't modify an HashMap while iterating over it
-		let mut neighbor_dirs_to_remove_from: Vec<(isize, usize)> = Vec::with_capacity(6);
-		for (dir, neighbor_pos_opt) in self.neighbors_by_cube[&pos].iter().enumerate() {
-			match neighbor_pos_opt {
+		for dir in DIRECTIONS.iter() {
+			match cube_info[*dir] {
 				Some(neighbor_pos) => {
-					let neighbor_enc_orig = self.enc_by_cube.get(&neighbor_pos).unwrap();
-					// we use rotation of [0,1,2,3,4,5] where the '0'
-					//   direction is -x and is the most significant bit
-					//   in each cube's .enc value, so we need '0' to
-					//   cause a left shift by 5 bits (then here we take
-					//   the mirror with XOR)
-					self.enc_by_cube.insert(*neighbor_pos, *neighbor_enc_orig - (1 << ((5-dir) ^ 1)));
-					neighbor_dirs_to_remove_from.push((*neighbor_pos, dir ^ 1));
-					// someday perhaps faster to use .push_within_capacity()
-					//neighbor_dirs_to_remove_from.push_within_capacity((*neighbor_pos, dir ^ 1));
+					match self.cube_info_by_pos.get_mut(&neighbor_pos) {
+						Some(neighbor_info) => {
+							// we use rotation of [0,1,2,3,4,5] where the '0'
+							//   direction is -x and is the most significant bit
+							//   in each cube's .enc value, so we need '0' to
+							//   cause a left shift by 5 bits (and here we use
+							//   XOR to flip to the opposite direction)
+							neighbor_info[6] = Some(neighbor_info[6].unwrap() - (1 << ((5-dir) ^ 1)));
+							// use XOR to flip between each direction and its opposite
+							//   to set the neighbor's neighbor to None
+							//   (0<->1, 2<->3, 4<->5)
+							neighbor_info[dir ^ 1] = None;
+						}
+						// panic here?  we should never have a cube with a neighbor
+						//   whose info doesn't exist in the map
+						None => {}
+					}
 				}
 				None => {}
 			}
 		}
-		for (neighbor_pos, dir) in neighbor_dirs_to_remove_from {
-			self.neighbors_by_cube.get_mut(&neighbor_pos).unwrap()[dir] = None;
-		}
-		self.enc_by_cube.remove(&pos);
-		self.neighbors_by_cube.remove(&pos);
 		self.n -= 1;
 		self.canonical_info = None;
 	}
@@ -332,8 +328,8 @@ impl Polycube {
 		//let max_vals: Vec<u8> = self.enc_by_cube.values().map(|enc: &u8| MAXIMUM_ROTATED_CUBE_VALUES[*enc as usize]).collect().sort();
 		//return max_vals;
 		let mut max_vals: Vec<u8> = Vec::new();
-		for cube_enc in self.enc_by_cube.values() {
-			max_vals.push(MAXIMUM_ROTATED_CUBE_VALUES[*cube_enc as usize]);
+		for cube_info in self.cube_info_by_pos.values() {
+			max_vals.push(MAXIMUM_ROTATED_CUBE_VALUES[cube_info[6].unwrap() as usize]);
 		}
 		max_vals.sort();
 		return max_vals;
@@ -344,7 +340,7 @@ impl Polycube {
 	//   value, we only need to find what that single largest value is
 	// (so we'll use this function instead of the above find_maximum_cube_values())
 	pub fn find_maximum_cube_value(&self) -> u8 {
-		return self.enc_by_cube.values().map(|enc: &u8| MAXIMUM_ROTATED_CUBE_VALUES[*enc as usize]).max().unwrap();
+		return self.cube_info_by_pos.values().map(|info| MAXIMUM_ROTATED_CUBE_VALUES[info[6].unwrap() as usize]).max().unwrap();
 	}
 
 	pub fn make_encoding_recursive(
@@ -356,7 +352,7 @@ impl Polycube {
 			rotations_index: usize,
 			mut offset: u8,
 			mut encoding: u128) -> Option<(Vec<isize>, u128, u8)> {
-		encoding = (encoding << 6) + (ROTATION_TABLE[self.enc_by_cube[&start_cube_pos] as usize][rotations_index] as u128);
+		encoding = (encoding << 6) + (ROTATION_TABLE[self.cube_info_by_pos[&start_cube_pos][6].unwrap() as usize][rotations_index] as u128);
 		// as soon as we can tell this is going to be an inferior encoding
 		//   (smaller int value than the given best known encofing)
 		//   we can stop right away
@@ -366,7 +362,7 @@ impl Polycube {
 		let mut ordered_cubes: Vec<isize> = Vec::from([start_cube_pos]);
 		included_cube_pos.insert(start_cube_pos);
 		for direction in rotation {
-			match self.neighbors_by_cube[&start_cube_pos][direction as usize] {
+			match self.cube_info_by_pos[&start_cube_pos][direction as usize] {
 				Some(neighbor_pos) => {
 					if included_cube_pos.contains(&neighbor_pos) {
 						continue;
@@ -433,12 +429,13 @@ impl Polycube {
 			};
 			let mut best_encoding: u128 = 0;
 			let mut encoding_diff: u128;
-			for (cube_pos, cube_enc) in self.enc_by_cube.iter() {
+			for (cube_pos, cube_info) in self.cube_info_by_pos.iter() {
+				let cube_enc = cube_info[6].unwrap() as usize;
 				// there could be more than one cube with the maximum rotated value
-				if MAXIMUM_ROTATED_CUBE_VALUES[*cube_enc as usize] < canonical.max_cube_value {
+				if MAXIMUM_ROTATED_CUBE_VALUES[cube_enc] < canonical.max_cube_value {
 					continue;
 				}
-				for rotations_index in MAXIMUM_CUBE_ROTATION_INDICES[*cube_enc as usize].iter() {
+				for rotations_index in MAXIMUM_CUBE_ROTATION_INDICES[cube_enc].iter() {
 					match self.make_encoding(*cube_pos, *rotations_index as usize, best_encoding) {
 						Some((encoding, least_significant_cube_pos)) => {
 							encoding_diff = encoding - best_encoding;
@@ -496,7 +493,7 @@ pub fn extend_single_thread(polycube: &mut Polycube, limit_n: u8, depth: usize) 
 	// for each cube, for each direction, add a cube
 	// create a list to iterate over because the dict will change
 	//   during recursion within the loop
-	let original_positions: Vec<isize> = polycube.enc_by_cube.keys().cloned().collect();
+	let original_positions: Vec<isize> = polycube.cube_info_by_pos.keys().cloned().collect();
 	// include all existing cubes' positions in the tried_pos set
 	tried_pos.extend(original_positions.iter());
 	for cube_pos in original_positions {
