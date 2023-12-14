@@ -32,7 +32,8 @@ def rotate_bit_list(bits, rot):
 
 # [0, 0, 0, 1, 0, 1] -> 5
 def bit_list_to_int(bits):
-	# nice one-liner but it could be slower than a loop
+	# nice one-liner but no need to use it -- this function is
+	#  only used by the intitial setup stuff when the script starts
 	#return sum([v << i for i,v in enumerate(reversed(bits))])
 	sum = 0
 	for i,v in enumerate(reversed(bits)):
@@ -454,6 +455,8 @@ class Polycube:
 
 	# for each cube, find its maximum value after a would-be rotation,
 	#   and return the sorted list of those values
+	# this lets us find which cube to start our maximal encoding with
+	#   (and which rotation to use for that).
 	def find_maximum_cube_values(self):
 		global maximum_rotated_cube_values
 		return sorted([maximum_rotated_cube_values[cube.enc] for cube in self.cubes.values()])
@@ -604,12 +607,12 @@ if __name__ == "__main__":
 
 	arg_parser = argparse.ArgumentParser(\
 		description='Count the number of (rotationally) unique polycubes containing up to n cubes')
-	arg_parser.add_argument('-n', metavar='<n>', type=int, required=False, default=-1,
+	arg_parser.add_argument('--n', '-n', metavar='<n>', type=int, required=False, default=-1,
 		help='the number of cubes the largest counted polycube should contain (>1)')
 	arg_parser.add_argument('--threads', metavar='<threads>', type=int, required=False, default=0,
 		help='0 for single-threaded, or >1 for the maximum number of threads to spawn simultaneously (default=0)')
 	arg_parser.add_argument('--spawn-n', metavar='<spawn-n>', type=int, required=False, default=8,
-		help='the smallest polycubes for which each will spawn a thread, higher->more shorter-lived threads (default=7)')
+		help='the smallest polycubes for which each will spawn a thread, higher->more shorter-lived threads (default=8)')
 	arg_parser.add_argument('--resume-from-file', metavar='<resume-file>', required=False,
 		help='a .json.gz file previously created by this script')
 
@@ -644,6 +647,7 @@ if __name__ == "__main__":
 		# enumerate all valid polycubes up to size limit_n
 		#   in a single thread
 		extend_single_thread(polycube=polycube, limit_n=args.n)
+		complete = True
 	else:
 		saved_worker_jobs = 0
 		total_worker_jobs = well_known_n_counts[args.spawn_n]
