@@ -174,97 +174,12 @@ const MAXIMUM_CUBE_ROTATION_INDICES: [&[u8]; 64] = [
 //   help calculate estimated time remaining
 //const WELL_KNOWN_N_COUNTS: [usize; 17] = [0, 1, 1, 2, 8, 29, 166, 1023, 6922, 48311, 346543, 2522522, 18598427, 138462649, 1039496297, 7859514470, 59795121480];
 
-// 5 -> [false, false, false, 1, false, 1]
-/*
-fn int_to_bit_list(n: u8) -> [bool; 6] {
-	let mut bit_list: [bool; 6] = [false; 6];
-	for i in 0..6 {
-		//bit_list[i] = ((n >> i) & 1) == 1;
-		//bit_list[i] = n & (1 << (5-i)) == 1;
-		bit_list[5-i] = (n >> i) & 1 == 1;
-	}
-	return bit_list;
-}
-
-fn bit_list_to_str(bit_list: [bool; 6]) -> String {
-	let mut s: String = String::new();
-	for i in 0..6 {
-		if bit_list[i] {
-			s.push('1');
-		} else {
-			s.push('0');
-		}
-	}
-	return s;
-}
-
-fn int_to_bit_str(n: u8) -> String {
-	return bit_list_to_str(int_to_bit_list(n));
-}
-
-fn neighbors_to_str(neighbors: [Option<isize>; 6]) -> String {
-	let mut s: String = String::new();
-	s.push_str("[");
-	for i in 0..6 {
-		match neighbors[i] {
-			Some(n) => {
-				s.push_str(&format!("{}, ", n));
-			}
-			None => {
-				s.push_str("None, ");
-			}
-		}
-	}
-	s.push_str("]");
-	return s;
-}
-*/
-
-/*
-// apply rotation: grab the ith bit from the list
-fn rotate_bit_list(bit_list: [bool; 6], rotation: [u8; 6]) -> [bool; 6] {
-	let mut new_bit_list: [bool; 6] = [false; 6];
-	for i in 0..6 {
-		new_bit_list[i] = bit_list[rotation[i] as usize];
-	}
-	return new_bit_list;
-}
-
-// [0, 0, 0, 1, 0, 1] -> 5
-fn bit_list_to_int(bit_list: [bool; 6]) -> u8 {
-	let mut n: u8 = 0;
-	for i in 0..6 {
-		if bit_list[i] {
-			n |= 1 << (5-i);
-		}
-	}
-	return n;
-}
-
-fn rotate_value(cube_enc: u8, rotation: [u8; 6]) -> u8 {
-	return bit_list_to_int(rotate_bit_list(int_to_bit_list(cube_enc), rotation))
-}
-
-fn build_rotation_table() -> [[u8; 24]; 64] {
-	let mut table: [[u8; 24]; 64] = [[0; 24]; 64];
-	// for each possible grouping of presence (1) or absence (0) of a cube's 6 neighbors (2^6=64 possibilities)
-	for cube_enc in 0..64 {
-		// apply each of the 24 possible rotations of a 3d object
-		for i in 0..24 {
-			table[cube_enc as usize][i] = rotate_value(cube_enc, ROTATIONS[i])
-		}
-	}
-	return table;
-}
-*/
-
 pub struct CanonicalInfo {
 	// at 6 bits per cube, 128 bits is enough room for a polycube of
 	//   size 21, but polycubes have never been enumerated past n=18
 	//   so 128 bits is plenty long for now
 	enc: u128,
 	least_significant_cube_pos: BTreeSet<isize>,
-	//max_cube_values: BTreeSet<u8>
 	max_cube_value: u8
 }
 
@@ -338,7 +253,6 @@ impl Polycube {
 	}
 
 	pub fn add(&mut self, pos: isize) {
-//		print!("adding cube at pos: [{}] for polycube of n={}\n", pos, self.n);
 		let mut new_enc: u8 = 0;
 		let mut new_neighbors: [Option<isize>; 6] = [None, None, None, None, None, None];
 
@@ -351,7 +265,6 @@ impl Polycube {
 			// if there is no neightbor cube in this direction, continue to next direction
 			match self.enc_by_cube.get(&neighbor_pos) {
 				Some(neighbor_enc) => {
-//					print!("    neighbor in dir [{}] at pos [{}] has old enc [{}]->[{}]\n", direction, neighbor_pos, neighbor_enc, int_to_bit_str(*neighbor_enc));
 					new_neighbors[*direction] = Some(neighbor_pos);
 					// we use rotation of [0,1,2,3,4,5] where the '0'
 					//   direction is -x and is the most significant bit
@@ -367,18 +280,12 @@ impl Polycube {
 					//   in each cube's .enc value, so we need '0' to
 					//   cause a left shift by 5 bits (and here we use
 					//   XOR to flip to the opposite direction)
-//					let tmp_debug_e = neighbor_enc | (1 << ((5-direction) ^ 1));
-//					let tmp_debug_n = self.neighbors_by_cube.get(&neighbor_pos).unwrap();
 					self.enc_by_cube.insert(neighbor_pos, neighbor_enc | (1 << ((5-direction) ^ 1)));
-//					print!("    neighbor in dir [{}] at pos [{}] has enc [{}]->[{}]\n", direction, neighbor_pos, tmp_debug_e, int_to_bit_str(tmp_debug_e));
-//					print!("    neighbor in dir [{}] at neighbor_pos [{}] has neighbors [{}]\n", direction, neighbor_pos, neighbors_to_str(*tmp_debug_n));
 				}
 				None => {}
 			}
 		}
 		// lastly, insert the new cube's encoded neighbors into our map
-//		print!("    new cube at pos [{}] has enc [{}]->[{}]\n", pos, new_enc, int_to_bit_str(new_enc));
-//		print!("    new cube at pos [{}] has neighbors [{}]\n", pos, neighbors_to_str(new_neighbors));
 		self.enc_by_cube.insert(pos, new_enc);
 		self.neighbors_by_cube.insert(pos, new_neighbors);
 		self.n += 1;
@@ -386,7 +293,6 @@ impl Polycube {
 	}
 
 	pub fn remove(&mut self, pos: isize) {
-//		print!("removing cube at pos: {}\n", pos);
 		// remove this cube from each of its neighbors
 		// create a Vec since we can't modify an HashMap while iterating over it
 		let mut neighbor_dirs_to_remove_from: Vec<(isize, usize)> = Vec::with_capacity(6);
@@ -394,14 +300,11 @@ impl Polycube {
 			match neighbor_pos_opt {
 				Some(neighbor_pos) => {
 					let neighbor_enc_orig = self.enc_by_cube.get(&neighbor_pos).unwrap();
-//					print!("    neighbor at pos [{}] has enc [{}]->[{}]\n", neighbor_pos, neighbor_enc_orig, int_to_bit_str(*neighbor_enc_orig));
 					// we use rotation of [0,1,2,3,4,5] where the '0'
 					//   direction is -x and is the most significant bit
 					//   in each cube's .enc value, so we need '0' to
 					//   cause a left shift by 5 bits (then here we take
 					//   the mirror with XOR)
-//					print!("    looking at dir [{}]\n", dir);
-//					print!("    subtracting [{}]->[{}]\n", 1 << ((5-dir) ^ 1), int_to_bit_str(1 << ((5-dir) ^ 1)));
 					self.enc_by_cube.insert(*neighbor_pos, *neighbor_enc_orig - (1 << ((5-dir) ^ 1)));
 					neighbor_dirs_to_remove_from.push((*neighbor_pos, dir ^ 1));
 					// someday perhaps faster to use .push_within_capacity()
@@ -601,19 +504,16 @@ pub fn extend_single_thread(polycube: &mut Polycube, limit_n: u8, depth: usize) 
 			try_pos = cube_pos + direction_cost;
 			// skip if we've already tried this position
 			if !tried_pos.insert(try_pos) {
-//				print!("{}skipping already tried try_pos=[{}]\n", " ".repeat(depth*4), try_pos);
 				continue;
 			}
 
 			// create p+1
-//			print!("{}adding try_pos=[{}]\n", " ".repeat(depth*4), try_pos);
 			polycube.add(try_pos);
 
 			// skip if we've already seen some p+1 with the same canonical representation
 			//   (comparing the bitwise int only)
 			canonical_try = polycube.find_canonical_info();
 			if !tried_canonicals.insert(canonical_try.enc) {
-//				print!("{}removing try_pos=[{}]\n", " ".repeat(depth*4), try_pos);
 				polycube.remove(try_pos);
 				continue;
 			}
@@ -621,14 +521,12 @@ pub fn extend_single_thread(polycube: &mut Polycube, limit_n: u8, depth: usize) 
 			// remove the last of the ordered cubes in p+1
 			least_significant_cube_pos = canonical_try.least_significant_cube_pos.first().unwrap().clone();
 
-//			print!("{}removing least sig=[{}]\n", " ".repeat(depth*4), least_significant_cube_pos);
 			polycube.remove(least_significant_cube_pos);
 
 			// if p+1-1 has the same canonical representation as p, count it as a new unique polycube
 			//   and continue recursion into that p+1
 			if polycube.find_canonical_info().enc == canonical_orig.enc {
 				// replace the least significant cube we just removed
-//				print!("{}replacing least sig=[{}]\n", " ".repeat(depth*4), least_significant_cube_pos);
 				polycube.add(least_significant_cube_pos);
 				extend_single_thread(polycube, limit_n, depth+1);
 			
@@ -637,12 +535,10 @@ pub fn extend_single_thread(polycube: &mut Polycube, limit_n: u8, depth: usize) 
 			//   since we remove that one before going to the next iteration
 			//   of the loop
 			} else if least_significant_cube_pos != try_pos {
-//				print!("{}replacing least sig=[{}]\n", " ".repeat(depth*4), least_significant_cube_pos);
 				polycube.add(least_significant_cube_pos);
 			}
 
 			// revert creating p+1 to try adding a cube at another position
-//			print!("{}removing try_pos=[{}]\n", " ".repeat(depth*4), try_pos);
 			polycube.remove(try_pos);
 		}
 	}

@@ -85,4 +85,5 @@ Running times (in seconds) for `--threads 0 -n 11` on an M1 Mac mini:
 | x86_64 | aarch64 |  commit | note  |
 |   ---: |    ---: |  :---:  | :---: |
 |  281.1 |   152.7 | 792714c | ported from python |
-|  207.2 |   109.2 |         | changed HashMap to BTreeMap |
+|  207.2 |   109.2 | d58f958 | changed HashMap to BTreeMap |
+|  157.3 |    86.5 | 65a1e61 | changed HashSet to BTreeSet |
