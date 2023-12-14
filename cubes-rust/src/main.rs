@@ -1,6 +1,6 @@
 
 use std::collections::BTreeSet;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::env;
 use std::path::PathBuf;
@@ -285,10 +285,10 @@ pub struct Polycube {
 	canonical_info: Option<CanonicalInfo>,
 	// keys - positions of cubes in this polycube
 	// vals - neighbor encoding for the cube at that position
-	enc_by_cube: HashMap<isize, u8>,
+	enc_by_cube: BTreeMap<isize, u8>,
 	// keys - positions of cubes in this polycube
 	// vals - neighbors of the cube at that position in DIRECTIONS order
-	neighbors_by_cube: HashMap<isize, [Option<isize>; 6]>
+	neighbors_by_cube: BTreeMap<isize, [Option<isize>; 6]>
 }
 
 impl Polycube {
@@ -298,16 +298,16 @@ impl Polycube {
 			Polycube {
 				n: 1,
 				canonical_info: None,
-				enc_by_cube: HashMap::from([(0, 0)]),
-				neighbors_by_cube: HashMap::from([(0, [None, None, None, None, None, None])])
+				enc_by_cube: BTreeMap::from([(0, 0)]),
+				neighbors_by_cube: BTreeMap::from([(0, [None, None, None, None, None, None])])
 			}
 		// intialize with no cubes
 		} else {
 			Polycube {
 				n: 0,
 				canonical_info: None,
-				enc_by_cube: HashMap::new(),
-				neighbors_by_cube: HashMap::new()
+				enc_by_cube: BTreeMap::new(),
+				neighbors_by_cube: BTreeMap::new()
 			}
 		}
 	}
