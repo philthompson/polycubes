@@ -1,9 +1,9 @@
 
 ## Polycubes
 
-A python 3 implementation of a hashtable-less polycube enumerator using the method described by presseyt (see link below).  This implementation can run on multiple CPU cores and can be halted and resumed.
+Python and Rust implementations of a hashtable-less polycube enumerator using the method described by presseyt (see link below).  The python implementation can run on multiple CPU cores and can be halted and resumed.
 
-This can theoretically be run across multiple machines (sum their final counts to find the final answer) even by hand after splitting its written `.json.gz` file into multiple files.  (It's not worth pursuing this though with this python implementation!)
+This can theoretically be run across multiple machines (sum their final counts to find the final answer) even by hand after splitting its written `.json.gz` file into multiple files.  (It's not worth pursuing this though with the python implementation!)
 
 ### Running
 
@@ -87,3 +87,4 @@ Running times (in seconds) for `--threads 0 -n 11` on an M1 Mac mini:
 |  281.1 |   152.7 | 792714c | ported from python |
 |  207.2 |   109.2 | d58f958 | changed HashMap to BTreeMap |
 |  157.3 |    86.5 | 65a1e61 | changed HashSet to BTreeSet |
+|  152.6 |    83.7 | 1831859 | use one BTreeSet for enc and neighbors |
