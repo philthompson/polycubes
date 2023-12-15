@@ -127,14 +127,14 @@ class Cube:
 # the initial delegator worker begins here
 def delegate_extend(polycube, n, halt_pipe_recv, submit_queue, response_queue, spawn_n):
 	try:
-		extend_with_thread_pool(
+		found_counts_by_n = extend_with_thread_pool(
 			polycube=polycube,
 			limit_n=n,
 			delegate_at_n=spawn_n,
 			submit_queue=submit_queue,
 			response_queue=response_queue,
-			halt_pipe=halt_pipe_recv,
-			depth=0)
+			halt_pipe=halt_pipe_recv)
+		response_queue.put((True, found_counts_by_n))
 	except HaltSignal:
 		# maybe indicate that the initial delegator worker was
 		#   halted with a special-case None value here
@@ -148,14 +148,14 @@ def worker_extend_outer(n, halt_pipe_recv, done_pipe_recv, submit_queue, respons
 	while not halted:
 		try:
 			polycube = submit_queue.get(block = True, timeout = 1.0)
-			extend_with_thread_pool(
+			found_counts_by_n = extend_with_thread_pool(
 				polycube=polycube,
 				limit_n=n,
 				delegate_at_n=0,
 				submit_queue=submit_queue,
 				response_queue=response_queue,
-				halt_pipe=halt_pipe_recv,
-				depth=0)
+				halt_pipe=halt_pipe_recv)
+			response_queue.put((True, found_counts_by_n))
 		except QueueEmpty:
 			if not halted and (halt_pipe_recv.poll() or done_pipe_recv.poll()):
 				halted = True
@@ -176,7 +176,7 @@ def worker_extend_outer(n, halt_pipe_recv, done_pipe_recv, submit_queue, respons
 		except QueueEmpty:
 			found_something = False
 
-def extend_with_thread_pool(*, polycube, limit_n, delegate_at_n, submit_queue, response_queue, halt_pipe, depth):
+def extend_with_thread_pool(*, polycube, limit_n, delegate_at_n, submit_queue, response_queue, halt_pipe):
 	global direction_costs
 
 	# we are done if we've reached the desired n,
@@ -265,8 +265,7 @@ def extend_with_thread_pool(*, polycube, limit_n, delegate_at_n, submit_queue, r
 						delegate_at_n=delegate_at_n, \
 						submit_queue=submit_queue, \
 						response_queue=response_queue, \
-						halt_pipe=halt_pipe, \
-						depth=depth+1)
+						halt_pipe=halt_pipe)
 					for n,count in enumerate(further_counts):
 						found_counts_by_n[n] += count
 
@@ -280,11 +279,7 @@ def extend_with_thread_pool(*, polycube, limit_n, delegate_at_n, submit_queue, r
 			# revert creating p+1 to try adding a cube at another position
 			tmp_add.remove(pos=try_pos)
 
-	if depth == 0:
-		response_queue.put((True, found_counts_by_n))
-		return
-	else:
-		return found_counts_by_n
+	return found_counts_by_n
 
 def extend_single_thread(*, polycube, limit_n):
 	global direction_costs
