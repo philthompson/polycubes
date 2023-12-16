@@ -382,6 +382,7 @@ class Polycube:
 		return new_polycube
 
 	def add(self, *, pos):
+#		print(f"adding cube at pos: {pos}")
 		global directions
 		new_cube = Cube(pos=pos)
 		self.cubes[pos] = new_cube
