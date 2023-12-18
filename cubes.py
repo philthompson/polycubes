@@ -127,7 +127,7 @@ class Cube:
 # the initial delegator worker begins here
 def delegate_extend(polycube, n, halt_pipe_recv, submit_queue, response_queue, spawn_n):
 	try:
-		found_counts_by_n = extend_with_thread_pool(
+		found_counts_by_n = extend_and_delegate(
 			polycube=polycube,
 			limit_n=n,
 			delegate_at_n=spawn_n,
@@ -148,10 +148,9 @@ def worker_extend_outer(n, halt_pipe_recv, done_pipe_recv, submit_queue, respons
 	while not halted:
 		try:
 			polycube = submit_queue.get(block = True, timeout = 1.0)
-			found_counts_by_n = extend_with_thread_pool(
+			found_counts_by_n = extend_as_worker(
 				polycube=polycube,
 				limit_n=n,
-				delegate_at_n=0,
 				submit_queue=submit_queue,
 				response_queue=response_queue,
 				halt_pipe=halt_pipe_recv)
@@ -176,7 +175,10 @@ def worker_extend_outer(n, halt_pipe_recv, done_pipe_recv, submit_queue, respons
 		except QueueEmpty:
 			found_something = False
 
-def extend_with_thread_pool(*, polycube, limit_n, delegate_at_n, submit_queue, response_queue, halt_pipe):
+# expand the polycube until we reach n=delegate_at_n (spawn_n) and
+#   and that point, place any found polycubes to enumerate into
+#   the submit queue
+def extend_and_delegate(*, polycube, limit_n, delegate_at_n, submit_queue, response_queue, halt_pipe):
 	global direction_costs
 
 	# we are done if we've reached the desired n,
@@ -240,18 +242,17 @@ def extend_with_thread_pool(*, polycube, limit_n, delegate_at_n, submit_queue, r
 				found_counts_by_n[tmp_add.n] += 1
 				# the initial delegator submits jobs for threads,
 				#   but only if the found polycube has n=spawn_n
-				if delegate_at_n > 0 and tmp_add.n == delegate_at_n:
+				if tmp_add.n == delegate_at_n:
 					submit_queue.put(tmp_add.copy())
 
 				# otherwise, continue recursion within this thread
 				else:
-					#further_counts = extend_with_thread_pool(polycube=tmp_add.copy(), limit_n=limit_n, initial_delegator=initial_delegator, write_to_file_queue=write_to_file_queue, halt_pipe=halt_pipe, submitted_threads=submitted_threads)
-					further_counts = extend_with_thread_pool(\
-						polycube=tmp_add.copy(), \
-						limit_n=limit_n, \
-						delegate_at_n=delegate_at_n, \
-						submit_queue=submit_queue, \
-						response_queue=response_queue, \
+					further_counts = extend_and_delegate(
+						polycube=tmp_add.copy(),
+						limit_n=limit_n,
+						delegate_at_n=delegate_at_n,
+						submit_queue=submit_queue,
+						response_queue=response_queue,
 						halt_pipe=halt_pipe)
 					for n,count in enumerate(further_counts):
 						found_counts_by_n[n] += count
@@ -269,18 +270,17 @@ def extend_with_thread_pool(*, polycube, limit_n, delegate_at_n, submit_queue, r
 					found_counts_by_n[tmp_add.n] += 1
 					# the initial delegator submits jobs for threads,
 					#   but only if the found polycube has n=spawn_n
-					if delegate_at_n > 0 and tmp_add.n == delegate_at_n:
+					if tmp_add.n == delegate_at_n:
 						submit_queue.put(tmp_add.copy())
 
 					# otherwise, continue recursion within this thread
 					else:
-						#further_counts = extend_with_thread_pool(polycube=tmp_add.copy(), limit_n=limit_n, initial_delegator=initial_delegator, write_to_file_queue=write_to_file_queue, halt_pipe=halt_pipe, submitted_threads=submitted_threads)
-						further_counts = extend_with_thread_pool(\
-							polycube=tmp_add.copy(), \
-							limit_n=limit_n, \
-							delegate_at_n=delegate_at_n, \
-							submit_queue=submit_queue, \
-							response_queue=response_queue, \
+						further_counts = extend_and_delegate(
+							polycube=tmp_add.copy(),
+							limit_n=limit_n,
+							delegate_at_n=delegate_at_n,
+							submit_queue=submit_queue,
+							response_queue=response_queue,
 							halt_pipe=halt_pipe)
 						for n,count in enumerate(further_counts):
 							found_counts_by_n[n] += count
@@ -290,6 +290,113 @@ def extend_with_thread_pool(*, polycube, limit_n, delegate_at_n, submit_queue, r
 
 			# revert creating p+1 to try adding a cube at another position
 			tmp_add.remove(pos=try_pos)
+
+	return found_counts_by_n
+
+# same as extend_single_thread, but
+#   - we report counts to the results queue
+#   - we occasionally check for a halt signal
+def extend_as_worker(*, polycube, limit_n, submit_queue, response_queue, halt_pipe):
+	global direction_costs
+
+	# we are done if we've reached the desired n,
+	#   which we need to stop at because we are doing
+	#   a depth-first recursive evaluation
+	if polycube.n == limit_n:
+		return []
+
+	found_counts_by_n = [0]*23
+
+	# keep a Set of all evaluated positions so we don't repeat them
+	tried_pos = set(polycube.cubes.keys())
+
+	tried_canonicals = set()
+	canonical_orig = polycube.find_canonical_info()
+
+	# faster to declare a variable here, ahead of the loop?
+	#   or can the varaible just be declared and used inside the loop?
+	try_pos = 0
+
+	# if halt has been signalled, abandon the evaluation
+	#   of this polycube
+	# since this function is run many many times by each process/thread,
+	#   we can greatly reduce use of Pipe.poll() and increase per-
+	#   process CPU utilization from ~90% to ~98% (at least on my
+	#   machine) by only checking for halt every 1000th iteration
+	if random.randrange(0, 1000) == 0 and halt_pipe.poll():
+		raise HaltSignal
+
+	# for each cube, for each direction, add a cube
+	# create a list to iterate over because the dict will change
+	#   during recursion within the loop
+	for cube_pos in list(polycube.cubes.keys()):
+		for direction_cost in direction_costs:
+
+			try_pos = cube_pos + direction_cost
+			if try_pos in tried_pos:
+				continue
+			tried_pos.add(try_pos)
+
+			# create p+1
+			polycube.add(pos=try_pos)
+
+			# skip if we've already seen some p+1 with the same canonical representation
+			#   (comparing the bitwise int only)
+			canonical_try = polycube.find_canonical_info()
+			if canonical_try[0] in tried_canonicals:
+				polycube.remove(pos=try_pos)
+				continue
+
+			tried_canonicals.add(canonical_try[0])
+
+			# enumerate the set of "last cubes", and grab one, where
+			#   enumerate.__next__() returns a tuple of (index, value)
+			#   and thus we need to use the 1th element of the tuple
+			least_significant_cube_pos = enumerate(canonical_try[1]).__next__()[1]
+
+			# if try_pos is the least significant, then p+1-1 is a new unique polycube
+			#   (use "is" here for faster comparison, since both are integers)
+			if least_significant_cube_pos == try_pos:
+				# allow the found polycube to be counted elsewhere
+				found_counts_by_n[polycube.n] += 1
+
+				# continue recursion within this thread
+				further_counts = extend_as_worker(
+					polycube=polycube,
+					limit_n=limit_n,
+					submit_queue=submit_queue,
+					response_queue=response_queue,
+					halt_pipe=halt_pipe)
+				for n,count in enumerate(further_counts):
+					found_counts_by_n[n] += count
+
+			else:
+				# remove the last of the ordered cubes in p+1
+				polycube.remove(pos=least_significant_cube_pos)
+
+				# if p+1-1 has the same canonical representation as p, count it as a new unique polycube
+				#   and continue recursion into that p+1
+				if polycube.find_canonical_info()[0] == canonical_orig[0]:
+					# replace the least significant cube we just removed
+					polycube.add(pos=least_significant_cube_pos)
+					# allow the found polycube to be counted elsewhere
+					found_counts_by_n[polycube.n] += 1
+
+					# continue recursion within this thread
+					further_counts = extend_as_worker(
+						polycube=polycube,
+						limit_n=limit_n,
+						submit_queue=submit_queue,
+						response_queue=response_queue,
+						halt_pipe=halt_pipe)
+					for n,count in enumerate(further_counts):
+						found_counts_by_n[n] += count
+
+				else:
+					polycube.add(pos=least_significant_cube_pos)
+
+			# revert creating p+1 to try adding a cube at another position
+			polycube.remove(pos=try_pos)
 
 	return found_counts_by_n
 
@@ -310,6 +417,8 @@ def extend_single_thread(*, polycube, limit_n):
 
 	tried_canonicals = set()
 
+	# this re-uses the already-calculated canonical info from the
+	#   calling function
 	canonical_orig = polycube.find_canonical_info()
 
 	# faster to declare a variable here, ahead of the loop?
@@ -342,14 +451,14 @@ def extend_single_thread(*, polycube, limit_n):
 			#   and thus we need to use the 1th element of the tuple
 			least_significant_cube_pos = enumerate(canonical_try[1]).__next__()[1]
 
-			# if try_pos is the least significant, then p+1-1 is a new unique polycube
+			# if try_pos is the least significant, then p+1-1==p and p+1 is a new unique polycube
 			if least_significant_cube_pos == try_pos:
 				extend_single_thread(polycube=polycube, limit_n=limit_n)
 
 			else:
 				# remove the last of the ordered cubes in p+1
 				polycube.remove(pos=least_significant_cube_pos)
-				# if p+1-1 has the same canonical representation as p, count it as a new unique polycube
+				# if p+1-1 has the same canonical representation as p, count p+1 as a new unique polycube
 				#   and continue recursion into that p+1
 				if polycube.find_canonical_info()[0] == canonical_orig[0]:
 					# replace the least significant cube we just removed
