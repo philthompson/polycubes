@@ -223,17 +223,14 @@ def extend_and_delegate(*, polycube, limit_n, delegate_at_n, submit_queue, respo
 
 			# skip if we've already seen some p+1 with the same canonical representation
 			#   (comparing the bitwise int only)
-			canonical_try = tmp_add.find_canonical_info()
+			canonical_try = tmp_add.find_canonical_info(look_for_pos_as_least_significant=try_pos)
 			if canonical_try[0] in tried_canonicals:
 				tmp_add.remove(pos=try_pos)
 				continue
 
 			tried_canonicals.add(canonical_try[0])
 
-			# enumerate the set of "last cubes", and grab one, where
-			#   enumerate.__next__() returns a tuple of (index, value)
-			#   and thus we need to use the 1th element of the tuple
-			least_significant_cube_pos = enumerate(canonical_try[1]).__next__()[1]
+			least_significant_cube_pos = canonical_try[1]
 
 			# if try_pos is the least significant, then p+1-1 is a new unique polycube
 			#   (use "is" here for faster comparison, since both are integers)
@@ -342,17 +339,14 @@ def extend_as_worker(*, polycube, limit_n, submit_queue, response_queue, halt_pi
 
 			# skip if we've already seen some p+1 with the same canonical representation
 			#   (comparing the bitwise int only)
-			canonical_try = polycube.find_canonical_info()
+			canonical_try = polycube.find_canonical_info(look_for_pos_as_least_significant=try_pos)
 			if canonical_try[0] in tried_canonicals:
 				polycube.remove(pos=try_pos)
 				continue
 
 			tried_canonicals.add(canonical_try[0])
 
-			# enumerate the set of "last cubes", and grab one, where
-			#   enumerate.__next__() returns a tuple of (index, value)
-			#   and thus we need to use the 1th element of the tuple
-			least_significant_cube_pos = enumerate(canonical_try[1]).__next__()[1]
+			least_significant_cube_pos = canonical_try[1]
 
 			# if try_pos is the least significant, then p+1-1 is a new unique polycube
 			#   (use "is" here for faster comparison, since both are integers)
@@ -439,17 +433,14 @@ def extend_single_thread(*, polycube, limit_n):
 
 			# skip if we've already seen some p+1 with the same canonical representation
 			#   (comparing the bitwise int only)
-			canonical_try = polycube.find_canonical_info()
+			canonical_try = polycube.find_canonical_info(look_for_pos_as_least_significant=try_pos)
 			if canonical_try[0] in tried_canonicals:
 				polycube.remove(pos=try_pos)
 				continue
 
 			tried_canonicals.add(canonical_try[0])
 
-			# enumerate the set of "last cubes", and grab one, where
-			#   enumerate.__next__() returns a tuple of (index, value)
-			#   and thus we need to use the 1th element of the tuple
-			least_significant_cube_pos = enumerate(canonical_try[1]).__next__()[1]
+			least_significant_cube_pos = canonical_try[1]
 
 			# if try_pos is the least significant, then p+1-1==p and p+1 is a new unique polycube
 			if least_significant_cube_pos == try_pos:
@@ -576,13 +567,14 @@ class Polycube:
 		if encoding < (best_encoding >> (offset * 6)):
 			#print(f"{self.n=},{offset=}:\n    best enc {int_to_bit_list_unbound(best_encoding >> (offset * 6))} >\n     new enc {int_to_bit_list_unbound(encoding)}")
 			raise AbandonEncoding
-		ordered_cubes = [self.cubes[start_cube_pos]]
+
+		least_sig_cube_pos = start_cube_pos
 		included_cube_pos.add(start_cube_pos)
 		for direction in rotation:
 			neighbor = self.cubes[start_cube_pos].neighbors[direction]
 			if neighbor is None or neighbor.pos in included_cube_pos:
 				continue
-			cubes, encoding, offset = self.make_encoding_recursive(
+			least_sig_cube_pos, encoding, offset = self.make_encoding_recursive(
 				start_cube_pos=neighbor.pos,
 				rotation=rotation,
 				included_cube_pos=included_cube_pos,
@@ -591,14 +583,13 @@ class Polycube:
 				offset=offset-1,
 				encoding=encoding
 			)
-			ordered_cubes += cubes
-		return (ordered_cubes, encoding, offset)
+		return (least_sig_cube_pos, encoding, offset)
 
 	def make_encoding(self, *, start_cube_pos, rotations_index, best_encoding):
 		global rotations
 		# uses a recursive depth-first encoding of all cubes, using
 		#   the provided rotation's order to traverse the cubes
-		ordered_cubes, encoding, _ = self.make_encoding_recursive(
+		least_sig_cube_pos, encoding, _ = self.make_encoding_recursive(
 			start_cube_pos=start_cube_pos,
 			rotation=rotations[rotations_index],
 			included_cube_pos=set(),
@@ -607,21 +598,24 @@ class Polycube:
 			offset=self.n-1, # number of 6-bit shifts from the right, where the last cube has an offset of 0
 			encoding=0
 		)
-		return (encoding, ordered_cubes[-1].pos)
+		return (encoding, least_sig_cube_pos)
 
 	def are_canonical_infos_equal(self, a, b):
 		# we can just compare the encoded int values, so we don't
 		#   need to compare the rest of the canonical info
 		return a[0] == b[0]
 
-	def find_canonical_info(self):
+	# if we don't care about tracking whether a specific cube is ever
+	#   the least significant cube in the final encoding, then just
+	#   track the cube at pos=50 which should never actually exist
+	def find_canonical_info(self, *, look_for_pos_as_least_significant=50):
 		global maximum_rotated_cube_values
 		if self.canonical_info is not None:
 			return self.canonical_info
 
 		maximum_rotated_values_of_cubes = self.find_maximum_cube_values()
 		max_rotated_value_of_any_cube = maximum_rotated_values_of_cubes[-1]
-		canonical = [0, set(), maximum_rotated_values_of_cubes]
+		canonical = [0, 50, maximum_rotated_values_of_cubes]
 		best_encoding = 0
 		encoding_diff = 0
 		for cube in self.cubes.values():
@@ -634,11 +628,13 @@ class Polycube:
 						encoding_diff = encoded_polycube[0] - canonical[0]
 						if encoding_diff > 0:
 							canonical[0] = encoded_polycube[0]
-							canonical[1].clear()
-							canonical[1].add(encoded_polycube[1])
+							canonical[1] = encoded_polycube[1]
 							best_encoding = encoded_polycube[0]
-						elif encoding_diff == 0:
-							canonical[1].add(encoded_polycube[1])
+						# if we've found an equivalent encoding but where the
+						#   tracked cube ends up in the least significant position,
+						#   record the fact of that
+						elif encoding_diff == 0 and encoded_polycube[1] == look_for_pos_as_least_significant:
+							canonical[1] = encoded_polycube[1]
 					except AbandonEncoding:
 						continue
 		self.canonical_info = canonical
