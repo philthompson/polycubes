@@ -63,7 +63,7 @@ Running times (in seconds) for `--threads 0 -n 11` on an M1 Mac mini:
 |        | 163.7 | 0c511c4 | faster tracking for when try_pos is least significant |
 | *221.2 | *63.6 |         | *attempt snowmanam2 algo |
 
-**\*** _my best attempt at snowmanam2's algorithm is very fast, but it uses lots of memory and is not perfectly parallel so it wouldn't be useful at this point for trying to enumerate for large values of n_
+**\*** _my best attempt at [snowmanam2's algorithm](https://github.com/snowmanam2/SnowmanPolycubeGenerator#algorithms) is very fast, but it uses lots of memory and is not perfectly parallel so it wouldn't be useful at this point for trying to enumerate for large values of n_
 
 Running times (in seconds) for `--threads 7 --spawn-n 7 -n 11` on an M1 Mac mini:
 | cpython |  pypy |  commit | note  |
@@ -108,4 +108,5 @@ Running times (in seconds) for `--threads 7 --spawn-n 7 -n 11` on an M1 Mac mini
 
 Running times (in seconds) for `--threads 7 --spawn-n 8 -n 12` on an M1 Mac mini:
 | x86_64 | aarch64 |  commit | note  |
+|   ---: |    ---: |  :---:  | :---: |
 |  122.4 |    90.3 | 5525df3 | Workers use one Polycube instance |
