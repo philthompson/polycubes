@@ -649,22 +649,15 @@ pub fn extend_multi_thread(polycube: &Polycube, canonical_orig_enc: u128, limit_
 				continue;
 			}
 
-			// remove the last of the ordered cubes in p+1
-			least_significant_cube_pos = canonical_try.least_significant_cube_pos.first().unwrap().clone();
+			least_significant_cube_pos = canonical_try.least_significant_cube_pos;
 
-			tmp_add.remove(least_significant_cube_pos);
-
-			// if p+1-1 has the same canonical representation as p, count it as a new unique polycube
-			//   and continue recursion into that p+1
-			if tmp_add.find_canonical_info().enc == canonical_orig_enc {
-				// replace the least significant cube we just removed
-				tmp_add.add(least_significant_cube_pos);
+			// if try_pos is the least significant, then p+1-1==p and p+1 is a new unique polycube
+			if least_significant_cube_pos == try_pos {
 				found_counts_by_n[tmp_add.n as usize] += 1;
-
 				// the initial delegator submits jobs for threads,
 				//   but only if the found polycube has n=spawn_n
 				if delegate_at_n > 0 && tmp_add.n == delegate_at_n {
-					submit_queue.push(tmp_add.copy());
+					let _ = submit_queue.push(tmp_add.copy());
 				} else {
 					match extend_multi_thread(&mut tmp_add.copy(),
 							tmp_add.find_canonical_info().enc, limit_n, delegate_at_n,
@@ -681,13 +674,44 @@ pub fn extend_multi_thread(polycube: &Polycube, canonical_orig_enc: u128, limit_
 						}
 					}
 				}
+			} else {
+				// remove the last of the ordered cubes in p+1
+				tmp_add.remove(least_significant_cube_pos);
+				// if p+1-1 has the same canonical representation as p, count p+1 as a new unique polycube
+				//   and continue recursion into that p+1
+				if tmp_add.find_canonical_info().enc == canonical_orig_enc {
+					// replace the least significant cube we just removed
+					tmp_add.add(least_significant_cube_pos);
+					found_counts_by_n[tmp_add.n as usize] += 1;
 
-			// undo the temporary removal of the least significant cube,
-			//   but only if it's not the same as the cube we just tried
-			//   since we remove that one before going to the next iteration
-			//   of the loop
-			} else if least_significant_cube_pos != try_pos {
-				tmp_add.add(least_significant_cube_pos);
+					// the initial delegator submits jobs for threads,
+					//   but only if the found polycube has n=spawn_n
+					if delegate_at_n > 0 && tmp_add.n == delegate_at_n {
+						let _ = submit_queue.push(tmp_add.copy());
+					} else {
+						match extend_multi_thread(&mut tmp_add.copy(),
+								tmp_add.find_canonical_info().enc, limit_n, delegate_at_n,
+								submit_queue, response_queue, atomic_halt, rng) {
+							Some(futher_counts) => {
+								for i in 1..limit_n+1 {
+									found_counts_by_n[i as usize] += futher_counts[i as usize];
+								}
+							}
+							// if we have detected a halt while running the recursion,
+							//   we can continue to bubble the halt back up
+							None => {
+								return None;
+							}
+						}
+					}
+
+				// undo the temporary removal of the least significant cube,
+				//   but only if it's not the same as the cube we just tried
+				//   since we remove that one before going to the next iteration
+				//   of the loop
+				} else {
+					tmp_add.add(least_significant_cube_pos);
+				}
 			}
 
 			// revert creating p+1 to try adding a cube at another position
@@ -747,24 +771,30 @@ pub fn extend_single_thread(polycube: &mut Polycube, limit_n: u8, depth: usize) 
 				continue;
 			}
 
-			// remove the last of the ordered cubes in p+1
 			least_significant_cube_pos = canonical_try.least_significant_cube_pos.first().unwrap().clone();
 
-			polycube.remove(least_significant_cube_pos);
-
-			// if p+1-1 has the same canonical representation as p, count it as a new unique polycube
-			//   and continue recursion into that p+1
-			if polycube.find_canonical_info().enc == canonical_orig.enc {
-				// replace the least significant cube we just removed
-				polycube.add(least_significant_cube_pos);
+			// if try_pos is the least significant, then p+1-1==p and p+1 is a new unique polycube
+			if least_significant_cube_pos == try_pos {
 				extend_single_thread(polycube,  limit_n, depth+1);
+			} else {
+				// remove the last of the ordered cubes in p+1
+				polycube.remove(least_significant_cube_pos);
+	
+				// if p+1-1 has the same canonical representation as p, count it as a new unique polycube
+				//   and continue recursion into that p+1
+				if polycube.find_canonical_info().enc == canonical_orig.enc {
+					// replace the least significant cube we just removed
+					polycube.add(least_significant_cube_pos);
+					extend_single_thread(polycube,  limit_n, depth+1);
+	
+				// undo the temporary removal of the least significant cube,
+				//   but only if it's not the same as the cube we just tried
+				//   since we remove that one before going to the next iteration
+				//   of the loop
+				} else {
+					polycube.add(least_significant_cube_pos);
+				}
 
-			// undo the temporary removal of the least significant cube,
-			//   but only if it's not the same as the cube we just tried
-			//   since we remove that one before going to the next iteration
-			//   of the loop
-			} else if least_significant_cube_pos != try_pos {
-				polycube.add(least_significant_cube_pos);
 			}
 
 			// revert creating p+1 to try adding a cube at another position
