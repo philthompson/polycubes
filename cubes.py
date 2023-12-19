@@ -125,7 +125,7 @@ class Cube:
 		return new_cube
 
 # the initial delegator worker begins here
-def delegate_extend(polycube, n, halt_pipe_recv, submit_queue, response_queue, spawn_n):
+def extend_and_delegate_outer(polycube, n, halt_pipe_recv, submit_queue, response_queue, spawn_n):
 	try:
 		found_counts_by_n = extend_and_delegate(
 			polycube=polycube,
@@ -141,7 +141,7 @@ def delegate_extend(polycube, n, halt_pipe_recv, submit_queue, response_queue, s
 		response_queue.put((False, None))
 
 # the regular workers begin here
-def worker_extend_outer(n, halt_pipe_recv, done_pipe_recv, submit_queue, response_queue):
+def extend_as_worker_outer(n, halt_pipe_recv, done_pipe_recv, submit_queue, response_queue):
 	halted = False
 	# wait for work to arrive if halt hasn't been signalled yet
 	#while not halted and not submit_queue.empty():
@@ -176,8 +176,8 @@ def worker_extend_outer(n, halt_pipe_recv, done_pipe_recv, submit_queue, respons
 			found_something = False
 
 # expand the polycube until we reach n=delegate_at_n (spawn_n) and
-#   and that point, place any found polycubes to enumerate into
-#   the submit queue
+#   and that point, place a .copy() of any found polycubes to
+#   enumerate into the submit queue
 def extend_and_delegate(*, polycube, limit_n, delegate_at_n, submit_queue, response_queue, halt_pipe):
 	global direction_costs
 
@@ -793,11 +793,11 @@ if __name__ == "__main__":
 				#   thread for the initial work delegator
 				initial_workers_to_spawn = args.threads - 1
 				n_counts[1] = 1
-				delegator_proc = Process(target=delegate_extend, args=(polycube, args.n, halt_pipe_recv, submit_queue, response_queue, args.spawn_n))
+				delegator_proc = Process(target=extend_and_delegate_outer, args=(polycube, args.n, halt_pipe_recv, submit_queue, response_queue, args.spawn_n))
 				delegator_proc.start()
 			processes = []
 			for i in range(0, initial_workers_to_spawn):
-				p = Process(target=worker_extend_outer, args=(args.n, halt_pipe_recv, done_pipe_recv, submit_queue, response_queue))
+				p = Process(target=extend_as_worker_outer, args=(args.n, halt_pipe_recv, done_pipe_recv, submit_queue, response_queue))
 				processes.append(p)
 				p.start()
 			halted = False
@@ -811,7 +811,7 @@ if __name__ == "__main__":
 					#   the same response_queue as the rest of the workers, but it shouldn't
 					#   be counted as a completed worker job
 					compl_worker_jobs -= 1
-					p = Process(target=worker_extend_outer, args=(args.n, halt_pipe_recv, done_pipe_recv, submit_queue, response_queue))
+					p = Process(target=extend_as_worker_outer, args=(args.n, halt_pipe_recv, done_pipe_recv, submit_queue, response_queue))
 					processes.append(p)
 					p.start()
 				# check for halt file

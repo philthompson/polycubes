@@ -499,12 +499,12 @@ static mut N_COUNTS: [usize; 23] = [0; 23];
 
 
 //  the initial delegator worker begins here
-pub fn delegate_extend(polycube: &mut Polycube, n: u8, atomic_halt: Arc<AtomicBool>,
+pub fn extend_and_delegate_outer(polycube: &mut Polycube, n: u8, atomic_halt: Arc<AtomicBool>,
 		submit_queue: Arc<ArrayQueue<Polycube>>, response_queue: Arc<ArrayQueue<ThreadResponse>>, spawn_n: u8) {
 	// thread-local random generator
 	let mut rng = thread_rng();
 	let orig_enc: u128 = polycube.find_canonical_info(IMPOSSIBLE_POS).enc;
-	match extend_multi_thread(
+	match extend_and_delegate(
 			polycube,
 			orig_enc,
 			n,
@@ -533,7 +533,7 @@ pub fn delegate_extend(polycube: &mut Polycube, n: u8, atomic_halt: Arc<AtomicBo
 	}
 }
 
-pub fn worker_extend_outer(n: u8, atomic_halt: Arc<AtomicBool>, atomic_done: Arc<AtomicBool>,
+pub fn extend_as_worker_outer(n: u8, atomic_halt: Arc<AtomicBool>, atomic_done: Arc<AtomicBool>,
 		submit_queue: Arc<ArrayQueue<Polycube>>, response_queue: Arc<ArrayQueue<ThreadResponse>>) {
 	let mut halted = false;
 	// thread-local random generator
@@ -551,12 +551,9 @@ pub fn worker_extend_outer(n: u8, atomic_halt: Arc<AtomicBool>, atomic_done: Arc
 			continue;
 		}
 		let mut polycube = polycube.unwrap();
-		let orig_enc: u128 = polycube.find_canonical_info(IMPOSSIBLE_POS).enc;
-		match extend_multi_thread(
-				& polycube,
-				orig_enc,
+		match extend_as_worker(
+				&mut polycube,
 				n,
-				0,
 				&submit_queue,
 				&response_queue,
 				&atomic_halt,
@@ -599,9 +596,12 @@ pub fn worker_extend_outer(n: u8, atomic_halt: Arc<AtomicBool>, atomic_done: Arc
 	//	response_queue.put((False, None))
 }
 
-pub fn extend_multi_thread(polycube: &Polycube, canonical_orig_enc: u128, limit_n: u8, delegate_at_n: u8,
-		submit_queue: &Arc<ArrayQueue<Polycube>>, response_queue: &Arc<ArrayQueue<ThreadResponse>>,
-		atomic_halt: &Arc<AtomicBool>, rng: &mut ThreadRng) -> Option<[usize; 23]> {
+// expand the polycube until we reach n=delegate_at_n (spawn_n) and
+//   and that point, place a .copy() of any found polycubes to
+//   enumerate into the submit queue
+pub fn extend_and_delegate(polycube: &Polycube, canonical_orig_enc: u128, limit_n: u8, delegate_at_n: u8,
+	submit_queue: &Arc<ArrayQueue<Polycube>>, response_queue: &Arc<ArrayQueue<ThreadResponse>>,
+	atomic_halt: &Arc<AtomicBool>, rng: &mut ThreadRng) -> Option<[usize; 23]> {
 
 	let mut found_counts_by_n: [usize; 23] = [0; 23];
 
@@ -663,10 +663,10 @@ pub fn extend_multi_thread(polycube: &Polycube, canonical_orig_enc: u128, limit_
 				found_counts_by_n[tmp_add.n as usize] += 1;
 				// the initial delegator submits jobs for threads,
 				//   but only if the found polycube has n=spawn_n
-				if delegate_at_n > 0 && tmp_add.n == delegate_at_n {
+				if tmp_add.n == delegate_at_n {
 					let _ = submit_queue.push(tmp_add.copy());
 				} else {
-					match extend_multi_thread(&mut tmp_add.copy(),
+					match extend_and_delegate(&mut tmp_add.copy(),
 							tmp_add.find_canonical_info(IMPOSSIBLE_POS).enc, limit_n, delegate_at_n,
 							submit_queue, response_queue, atomic_halt, rng) {
 						Some(futher_counts) => {
@@ -693,10 +693,10 @@ pub fn extend_multi_thread(polycube: &Polycube, canonical_orig_enc: u128, limit_
 
 					// the initial delegator submits jobs for threads,
 					//   but only if the found polycube has n=spawn_n
-					if delegate_at_n > 0 && tmp_add.n == delegate_at_n {
+					if tmp_add.n == delegate_at_n {
 						let _ = submit_queue.push(tmp_add.copy());
 					} else {
-						match extend_multi_thread(&mut tmp_add.copy(),
+						match extend_and_delegate(&mut tmp_add.copy(),
 								tmp_add.find_canonical_info(IMPOSSIBLE_POS).enc, limit_n, delegate_at_n,
 								submit_queue, response_queue, atomic_halt, rng) {
 							Some(futher_counts) => {
@@ -723,6 +723,126 @@ pub fn extend_multi_thread(polycube: &Polycube, canonical_orig_enc: u128, limit_
 
 			// revert creating p+1 to try adding a cube at another position
 			tmp_add.remove(try_pos);
+		}
+	}
+	return Some(found_counts_by_n);
+}
+
+// same as extend_single_thread, but
+//   - we report counts to the results queue
+//   - we occasionally check for a halt signal
+pub fn extend_as_worker(polycube: &mut Polycube, limit_n: u8,
+		submit_queue: &Arc<ArrayQueue<Polycube>>, response_queue: &Arc<ArrayQueue<ThreadResponse>>,
+		atomic_halt: &Arc<AtomicBool>, rng: &mut ThreadRng) -> Option<[usize; 23]> {
+
+	let mut found_counts_by_n: [usize; 23] = [0; 23];
+
+	found_counts_by_n[polycube.n as usize] += 1;
+
+	// we are done if we've reached the desired n,
+	//   which we need to stop at because we are doing
+	//   a depth-first recursive evaluation
+	if polycube.n == limit_n {
+		return Some(found_counts_by_n);
+	}
+
+	// keep a Set of all evaluated positions so we don't repeat them
+	let mut tried_pos: BTreeSet<isize> = BTreeSet::new();
+
+	let mut tried_canonicals: BTreeSet<u128> = BTreeSet::new();
+
+	// i'd like to not clone this, but that might not be possible
+	//let canonical_orig: CanonicalInfo = polycube.find_canonical_info(IMPOSSIBLE_POS).clone();
+	let canonical_orig_enc: u128 = polycube.find_canonical_info(IMPOSSIBLE_POS).enc;
+	let mut canonical_try: &CanonicalInfo;
+	let mut least_significant_cube_pos: isize;
+
+	let mut try_pos: isize;
+
+	// if halt has been signalled, abandon the evaluation
+	//   of this polycube
+	// since this function is run many many times by each process/thread,
+	//   we can greatly reduce use of AtomicBool.load() and increase per-
+	//   process CPU utilization
+	if rng.gen_range(0..1000) == 0 && atomic_halt.load(Ordering::Relaxed) {
+		return None;
+	}
+
+	// for each cube, for each direction, add a cube
+	// create a list to iterate over because the dict will change
+	//   during recursion within the loop
+	let original_positions: Vec<isize> = polycube.cube_info_by_pos.keys().cloned().collect();
+	// include all existing cubes' positions in the tried_pos set
+	tried_pos.extend(original_positions.iter());
+	for cube_pos in original_positions {
+		for direction_cost in DIRECTION_COSTS {
+			try_pos = cube_pos + direction_cost;
+			// skip if we've already tried this position
+			if !tried_pos.insert(try_pos) {
+				continue;
+			}
+
+			// create p+1
+			polycube.add(try_pos);
+
+			// skip if we've already seen some p+1 with the same canonical representation
+			//   (comparing the bitwise int only)
+			canonical_try = polycube.find_canonical_info(try_pos);
+			if !tried_canonicals.insert(canonical_try.enc) {
+				polycube.remove(try_pos);
+				continue;
+			}
+
+			least_significant_cube_pos = canonical_try.least_significant_cube_pos;
+
+			// if try_pos is the least significant, then p+1-1==p and p+1 is a new unique polycube
+			if least_significant_cube_pos == try_pos {
+				match extend_as_worker(polycube, limit_n,
+						submit_queue, response_queue, atomic_halt, rng) {
+					Some(futher_counts) => {
+						for i in 1..limit_n+1 {
+							found_counts_by_n[i as usize] += futher_counts[i as usize];
+						}
+					}
+					// if we have detected a halt while running the recursion,
+					//   we can continue to bubble the halt back up
+					None => {
+						return None;
+					}
+				}
+			} else {
+				// remove the last of the ordered cubes in p+1
+				polycube.remove(least_significant_cube_pos);
+				// if p+1-1 has the same canonical representation as p, count p+1 as a new unique polycube
+				//   and continue recursion into that p+1
+				if polycube.find_canonical_info(IMPOSSIBLE_POS).enc == canonical_orig_enc {
+					// replace the least significant cube we just removed
+					polycube.add(least_significant_cube_pos);
+					match extend_as_worker(polycube, limit_n,
+							submit_queue, response_queue, atomic_halt, rng) {
+						Some(futher_counts) => {
+							for i in 1..limit_n+1 {
+								found_counts_by_n[i as usize] += futher_counts[i as usize];
+							}
+						}
+						// if we have detected a halt while running the recursion,
+						//   we can continue to bubble the halt back up
+						None => {
+							return None;
+						}
+					}
+
+				// undo the temporary removal of the least significant cube,
+				//   but only if it's not the same as the cube we just tried
+				//   since we remove that one before going to the next iteration
+				//   of the loop
+				} else {
+					polycube.add(least_significant_cube_pos);
+				}
+			}
+
+			// revert creating p+1 to try adding a cube at another position
+			polycube.remove(try_pos);
 		}
 	}
 	return Some(found_counts_by_n);
@@ -1147,7 +1267,7 @@ fn main() {
 				let rq = response_queue.clone();
 				let handle = thread::spawn(move || {
 					let mut polycube: Polycube = Polycube::new(true);
-					delegate_extend(&mut polycube, arg_n, ah, sq, rq, arg_spawn_n);
+					extend_and_delegate_outer(&mut polycube, arg_n, ah, sq, rq, arg_spawn_n);
 				});
 				Some(handle)
 			}
@@ -1159,7 +1279,7 @@ fn main() {
 			let sq = submit_queue.clone();
 			let rq = response_queue.clone();
 			let handle = thread::spawn(move || {
-				worker_extend_outer(arg_n, ah, ad, sq, rq);
+				extend_as_worker_outer(arg_n, ah, ad, sq, rq);
 			});
 			worker_handles.push(handle);
 		}
@@ -1180,7 +1300,7 @@ fn main() {
 				let sq = submit_queue.clone();
 				let rq = response_queue.clone();
 				let handle = thread::spawn(move || {
-					worker_extend_outer(arg_n, ah, ad, sq, rq);
+					extend_as_worker_outer(arg_n, ah, ad, sq, rq);
 				});
 				worker_handles.push(handle);
 			}
