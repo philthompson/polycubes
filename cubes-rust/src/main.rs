@@ -194,6 +194,11 @@ const WELL_KNOWN_N_COUNTS: [usize; 17] = [0, 1, 1, 2, 8, 29, 166, 1023, 6922, 48
 // store counts for 0 cubes, 1 cube, 2 cubes, etc, up to MAX_N-1
 const MAX_N: usize = 22+1;
 
+// since we offset in the +x direction by 1 unit for each cube,
+//   and enumerating cubes for n=50 is way beyond what's possible,
+//   we can use pos=50 as a placeholder for an "impossible" pos
+const IMPOSSIBLE_POS: isize = 50;
+
 pub struct ThreadResponse {
 	pub job_complete: bool,
 	pub results: Option<[usize; MAX_N]>,
@@ -204,7 +209,7 @@ pub struct CanonicalInfo {
 	//   size 21, but polycubes have never been enumerated past n=18
 	//   so 128 bits is plenty long for now
 	enc: u128,
-	least_significant_cube_pos: BTreeSet<isize>,
+	least_significant_cube_pos: isize,
 	max_cube_value: u8
 }
 
@@ -212,7 +217,7 @@ impl CanonicalInfo {
 	pub fn clone(&self) -> CanonicalInfo {
 		CanonicalInfo {
 			enc: self.enc,
-			least_significant_cube_pos: self.least_significant_cube_pos.clone(),
+			least_significant_cube_pos: self.least_significant_cube_pos,
 			max_cube_value: self.max_cube_value
 		}
 	}
@@ -376,7 +381,7 @@ impl Polycube {
 			best_encoding: u128,
 			rotations_index: usize,
 			mut offset: u8,
-			mut encoding: u128) -> Option<(Vec<isize>, u128, u8)> {
+			mut encoding: u128) -> Option<(isize, u128, u8)> {
 		encoding = (encoding << 6) + (ROTATION_TABLE[self.cube_info_by_pos[&start_cube_pos][6].unwrap() as usize][rotations_index] as u128);
 		// as soon as we can tell this is going to be an inferior encoding
 		//   (smaller int value than the given best known encofing)
@@ -384,7 +389,7 @@ impl Polycube {
 		if encoding < (best_encoding >> (offset * 6)) {
 			return None;
 		}
-		let mut ordered_cubes: Vec<isize> = Vec::from([start_cube_pos]);
+		let mut least_sig_cube_pos = start_cube_pos;
 		included_cube_pos.insert(start_cube_pos);
 		for direction in rotation {
 			match self.cube_info_by_pos[&start_cube_pos][direction as usize] {
@@ -400,8 +405,8 @@ impl Polycube {
 							rotations_index,
 							offset - 1,
 							encoding) {
-						Some((mut ordered_cubes_new, encoding_ret, offset_ret)) => {
-							ordered_cubes.append(&mut ordered_cubes_new);
+						Some((mut least_sig_cube_pos_new, encoding_ret, offset_ret)) => {
+							least_sig_cube_pos = least_sig_cube_pos_new;
 							encoding = encoding_ret;
 							offset = offset_ret;
 						}
@@ -417,7 +422,7 @@ impl Polycube {
 				None => {}
 			}
 		}
-		return Some((ordered_cubes, encoding, offset));
+		return Some((least_sig_cube_pos, encoding, offset));
 	}
 
 	pub fn make_encoding(&self, start_cube_pos: isize, rotations_index: usize, best_encoding: u128) -> Option<(u128, isize)> {
@@ -432,8 +437,8 @@ impl Polycube {
 				rotations_index,
 				self.n - 1, // number of 6-bit shifts from the right, where the last cube has an offset of 0
 				0) {
-			Some((ordered_cubes, encoding, _offset)) => {
-				return Some((encoding, *ordered_cubes.last().unwrap()));
+			Some((least_sig_cube_pos, encoding, _offset)) => {
+				return Some((encoding, least_sig_cube_pos));
 			}
 			// if the Option is empty, that means we have determined
 			//   somewhere deeper in the recursion that this is
@@ -445,11 +450,11 @@ impl Polycube {
 	}
 
 	// return our canonical info, calculating it first if necessary
-	pub fn find_canonical_info(&mut self) -> &CanonicalInfo {
+	pub fn find_canonical_info(&mut self, look_for_pos_as_least_significant: isize) -> &CanonicalInfo {
 		if self.canonical_info.is_none() {
 			let mut canonical = CanonicalInfo {
 				enc: 0,
-				least_significant_cube_pos: BTreeSet::new(),
+				least_significant_cube_pos: IMPOSSIBLE_POS,
 				max_cube_value: self.find_maximum_cube_value()
 			};
 			let mut best_encoding: u128 = 0;
@@ -466,11 +471,13 @@ impl Polycube {
 							encoding_diff = encoding - best_encoding;
 							if encoding_diff > 0 {
 								canonical.enc = encoding;
-								canonical.least_significant_cube_pos.clear();
-								canonical.least_significant_cube_pos.insert(least_significant_cube_pos);
+								canonical.least_significant_cube_pos = least_significant_cube_pos;
 								best_encoding = encoding;
-							} else if encoding_diff == 0 {
-								canonical.least_significant_cube_pos.insert(least_significant_cube_pos);
+							// if we've found an equivalent encoding but where the
+							//   tracked cube ends up in the least significant position,
+							//   record the fact of that
+							} else if encoding_diff == 0 && least_significant_cube_pos == look_for_pos_as_least_significant {
+								canonical.least_significant_cube_pos = least_significant_cube_pos;
 							}
 						}
 						// if the Option is empty, that means we have determined
@@ -496,7 +503,7 @@ pub fn delegate_extend(polycube: &mut Polycube, n: u8, atomic_halt: Arc<AtomicBo
 		submit_queue: Arc<ArrayQueue<Polycube>>, response_queue: Arc<ArrayQueue<ThreadResponse>>, spawn_n: u8) {
 	// thread-local random generator
 	let mut rng = thread_rng();
-	let orig_enc: u128 = polycube.find_canonical_info().enc;
+	let orig_enc: u128 = polycube.find_canonical_info(IMPOSSIBLE_POS).enc;
 	match extend_multi_thread(
 			polycube,
 			orig_enc,
@@ -544,7 +551,7 @@ pub fn worker_extend_outer(n: u8, atomic_halt: Arc<AtomicBool>, atomic_done: Arc
 			continue;
 		}
 		let mut polycube = polycube.unwrap();
-		let orig_enc: u128 = polycube.find_canonical_info().enc;
+		let orig_enc: u128 = polycube.find_canonical_info(IMPOSSIBLE_POS).enc;
 		match extend_multi_thread(
 				& polycube,
 				orig_enc,
@@ -643,7 +650,7 @@ pub fn extend_multi_thread(polycube: &Polycube, canonical_orig_enc: u128, limit_
 
 			// skip if we've already seen some p+1 with the same canonical representation
 			//   (comparing the bitwise int only)
-			canonical_try = tmp_add.find_canonical_info();
+			canonical_try = tmp_add.find_canonical_info(try_pos);
 			if !tried_canonicals.insert(canonical_try.enc) {
 				tmp_add.remove(try_pos);
 				continue;
@@ -660,7 +667,7 @@ pub fn extend_multi_thread(polycube: &Polycube, canonical_orig_enc: u128, limit_
 					let _ = submit_queue.push(tmp_add.copy());
 				} else {
 					match extend_multi_thread(&mut tmp_add.copy(),
-							tmp_add.find_canonical_info().enc, limit_n, delegate_at_n,
+							tmp_add.find_canonical_info(IMPOSSIBLE_POS).enc, limit_n, delegate_at_n,
 							submit_queue, response_queue, atomic_halt, rng) {
 						Some(futher_counts) => {
 							for i in 1..limit_n+1 {
@@ -679,7 +686,7 @@ pub fn extend_multi_thread(polycube: &Polycube, canonical_orig_enc: u128, limit_
 				tmp_add.remove(least_significant_cube_pos);
 				// if p+1-1 has the same canonical representation as p, count p+1 as a new unique polycube
 				//   and continue recursion into that p+1
-				if tmp_add.find_canonical_info().enc == canonical_orig_enc {
+				if tmp_add.find_canonical_info(IMPOSSIBLE_POS).enc == canonical_orig_enc {
 					// replace the least significant cube we just removed
 					tmp_add.add(least_significant_cube_pos);
 					found_counts_by_n[tmp_add.n as usize] += 1;
@@ -690,7 +697,7 @@ pub fn extend_multi_thread(polycube: &Polycube, canonical_orig_enc: u128, limit_
 						let _ = submit_queue.push(tmp_add.copy());
 					} else {
 						match extend_multi_thread(&mut tmp_add.copy(),
-								tmp_add.find_canonical_info().enc, limit_n, delegate_at_n,
+								tmp_add.find_canonical_info(IMPOSSIBLE_POS).enc, limit_n, delegate_at_n,
 								submit_queue, response_queue, atomic_halt, rng) {
 							Some(futher_counts) => {
 								for i in 1..limit_n+1 {
@@ -740,7 +747,7 @@ pub fn extend_single_thread(polycube: &mut Polycube, limit_n: u8, depth: usize) 
 	let mut tried_canonicals: BTreeSet<u128> = BTreeSet::new();
 
 	// i'd like to not clone this, but that might not be possible
-	let canonical_orig: CanonicalInfo = polycube.find_canonical_info().clone();
+	let canonical_orig: CanonicalInfo = polycube.find_canonical_info(IMPOSSIBLE_POS).clone();
 	let mut canonical_try: &CanonicalInfo;
 	let mut least_significant_cube_pos: isize;
 
@@ -765,13 +772,13 @@ pub fn extend_single_thread(polycube: &mut Polycube, limit_n: u8, depth: usize) 
 
 			// skip if we've already seen some p+1 with the same canonical representation
 			//   (comparing the bitwise int only)
-			canonical_try = polycube.find_canonical_info();
+			canonical_try = polycube.find_canonical_info(try_pos);
 			if !tried_canonicals.insert(canonical_try.enc) {
 				polycube.remove(try_pos);
 				continue;
 			}
 
-			least_significant_cube_pos = canonical_try.least_significant_cube_pos.first().unwrap().clone();
+			least_significant_cube_pos = canonical_try.least_significant_cube_pos;
 
 			// if try_pos is the least significant, then p+1-1==p and p+1 is a new unique polycube
 			if least_significant_cube_pos == try_pos {
@@ -782,7 +789,7 @@ pub fn extend_single_thread(polycube: &mut Polycube, limit_n: u8, depth: usize) 
 	
 				// if p+1-1 has the same canonical representation as p, count it as a new unique polycube
 				//   and continue recursion into that p+1
-				if polycube.find_canonical_info().enc == canonical_orig.enc {
+				if polycube.find_canonical_info(IMPOSSIBLE_POS).enc == canonical_orig.enc {
 					// replace the least significant cube we just removed
 					polycube.add(least_significant_cube_pos);
 					extend_single_thread(polycube,  limit_n, depth+1);
