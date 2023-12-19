@@ -19,7 +19,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::thread;
 use std::thread::JoinHandle;
-use std::thread::Thread;
+//use std::thread::Thread;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -405,7 +405,7 @@ impl Polycube {
 							rotations_index,
 							offset - 1,
 							encoding) {
-						Some((mut least_sig_cube_pos_new, encoding_ret, offset_ret)) => {
+						Some((least_sig_cube_pos_new, encoding_ret, offset_ret)) => {
 							least_sig_cube_pos = least_sig_cube_pos_new;
 							encoding = encoding_ret;
 							offset = offset_ret;
@@ -523,12 +523,12 @@ pub fn extend_and_delegate_outer(polycube: &mut Polycube, n: u8, atomic_halt: Ar
 					None => {}
 				}
 			}
-			response_queue.push(ThreadResponse{ job_complete: true, results: Some(all_n_counts), polycube: None });
+			let _ = response_queue.push(ThreadResponse{ job_complete: true, results: Some(all_n_counts), polycube: None });
 		}
 		None => {
 			// indicate that the initial delegator worker was
 			//   halted with a special-case results=None and polycube=None here
-			response_queue.push(ThreadResponse{ job_complete: false, results: None, polycube: None });
+			let _ = response_queue.push(ThreadResponse{ job_complete: false, results: None, polycube: None });
 		}
 	}
 }
@@ -568,11 +568,11 @@ pub fn extend_as_worker_outer(n: u8, atomic_halt: Arc<AtomicBool>, atomic_done: 
 						None => {}
 					}
 				}
-				response_queue.push(ThreadResponse{ job_complete: true, results: Some(all_n_counts), polycube: None });
+				let _ = response_queue.push(ThreadResponse{ job_complete: true, results: Some(all_n_counts), polycube: None });
 			}
 			None => {
 				// stopped due to the halt
-				response_queue.push(ThreadResponse{ job_complete: false, results: None, polycube: Some(polycube.copy()) });
+				let _ = response_queue.push(ThreadResponse{ job_complete: false, results: None, polycube: Some(polycube.copy()) });
 			}
 
 		}
@@ -580,14 +580,14 @@ pub fn extend_as_worker_outer(n: u8, atomic_halt: Arc<AtomicBool>, atomic_done: 
 	// after halt, drain the queue
 	let mut found_something = true;
 	while found_something {
-		let mut polycube = submit_queue.pop();
+		let polycube = submit_queue.pop();
 		// put a message here to indicate that this Polycube is
 		//   unevaluated
 		if polycube.is_none() {
 			found_something = false;
 			continue;
 		}
-		response_queue.push(ThreadResponse{ job_complete: false, results: None, polycube: polycube });
+		let _ = response_queue.push(ThreadResponse{ job_complete: false, results: None, polycube: polycube });
 	}
 
 	//except HaltSignal:
@@ -1187,7 +1187,7 @@ fn main() {
 		//extend_single_thread(&mut polycube, arg_n, 0);
 		extend_single_thread(&mut Polycube::new(true), arg_n, 0);
 	} else {
-		let mut polycubes_to_resume: Vec<Vec<isize>> = match arg_resume_file.as_ref() {
+		let polycubes_to_resume: Vec<Vec<isize>> = match arg_resume_file.as_ref() {
 			Some(resume_file_path) => {
 				let (
 					resume_n,
@@ -1273,7 +1273,7 @@ fn main() {
 			}
 		};
 		let mut worker_handles: Vec<JoinHandle<()>> = Vec::new();
-		for i in 0..initial_workers_to_spawn {
+		for _i in 0..initial_workers_to_spawn {
 			let ah = atomic_halt.clone();
 			let ad = atomic_done.clone();
 			let sq = submit_queue.clone();
