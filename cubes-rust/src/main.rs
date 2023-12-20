@@ -1143,7 +1143,7 @@ fn main() {
 	-  <n>          : the number of cubes the largest counted polycube should contain (>1)\n\
 	-  <threads>    : 0 for single-threaded, or >1 for the maximum number of threads to spawn simultaneously (default=0)\n\
 	-  <spawn-n>    : the smallest polycubes for which each will spawn a thread, higher->more shorter-lived threads (default=8)\n\
-	-  <resume-file>: a .json.gz file previously created by this program",
+	-  <resume-file>: a .txt.gz file previously created by this program",
 	args[0]);
 	if args.len() < 3 {
 		println!("{}", usage);
@@ -1160,12 +1160,15 @@ fn main() {
 		if args[cursor] == "--help" || args[cursor] == "-h" {
 			println!("{}", usage);
 			exit(1);
-		}
-		if args[cursor] == "--n" || args[cursor] == "-n" {
+		} else if args[cursor] == "--n" || args[cursor] == "-n" {
 			arg_n = match args[cursor + 1].parse() {
 				Ok(n) => {
 					if n < 2 {
 						println!("error: n must be greater than 1");
+						println!("{}", usage);
+						exit(1);
+					} else if n > 21 {
+						println!("error: n greater than 21 not yet ;) supported");
 						println!("{}", usage);
 						exit(1);
 					}
@@ -1177,8 +1180,7 @@ fn main() {
 					exit(1);
 				}
 			};
-		}
-		if args[cursor] == "--threads" || args[cursor] == "-t" {
+		} else if args[cursor] == "--threads" || args[cursor] == "-t" {
 			arg_threads = match args[cursor + 1].parse() {
 				Ok(threads) => {
 					if threads == 1 {
@@ -1194,8 +1196,7 @@ fn main() {
 					exit(1);
 				}
 			};
-		}
-		if args[cursor] == "--spawn-n" || args[cursor] == "-s" {
+		} else if args[cursor] == "--spawn-n" || args[cursor] == "-s" {
 			arg_spawn_n = match args[cursor + 1].parse() {
 				Ok(spawn_n) => {
 					if spawn_n < 4 {
@@ -1211,8 +1212,7 @@ fn main() {
 					exit(1);
 				}
 			};
-		}
-		if args[cursor] == "--resume-from-file" || args[cursor] == "-r" {
+		} else if args[cursor] == "--resume-from-file" || args[cursor] == "-r" {
 			arg_resume_file = match validate_resume_file(&args[cursor + 1]) {
 				Ok(path) => Some(path),
 				Err(err) => {
@@ -1221,6 +1221,10 @@ fn main() {
 					exit(1);
 				}
 			};
+		} else {
+			println!("error: unknown argument [{}]", args[cursor]);
+			println!("{}", usage);
+			exit(1);
 		}
 		cursor += 2;
 	}
