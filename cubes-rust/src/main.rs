@@ -503,10 +503,8 @@ pub fn extend_and_delegate_outer(polycube: &mut Polycube, n: u8, atomic_halt: Ar
 		submit_queue: Arc<ArrayQueue<Polycube>>, response_queue: Arc<ArrayQueue<ThreadResponse>>, spawn_n: u8) {
 	// thread-local random generator
 	let mut rng = thread_rng();
-	let orig_enc: u128 = polycube.find_canonical_info(IMPOSSIBLE_POS).enc;
 	match extend_and_delegate(
 			polycube,
-			orig_enc,
 			n,
 			spawn_n,
 			&submit_queue,
@@ -628,7 +626,7 @@ pub fn extend_as_worker_outer(n: u8, atomic_halt: Arc<AtomicBool>, atomic_done: 
 // expand the polycube until we reach n=delegate_at_n (spawn_n) and
 //   and that point, place a .copy() of any found polycubes to
 //   enumerate into the submit queue
-pub fn extend_and_delegate(polycube: &Polycube, canonical_orig_enc: u128, limit_n: u8, delegate_at_n: u8,
+pub fn extend_and_delegate(polycube: &Polycube, limit_n: u8, delegate_at_n: u8,
 	submit_queue: &Arc<ArrayQueue<Polycube>>, response_queue: &Arc<ArrayQueue<ThreadResponse>>,
 	atomic_halt: &Arc<AtomicBool>, rng: &mut ThreadRng) -> Option<[usize; 23]> {
 
@@ -647,12 +645,11 @@ pub fn extend_and_delegate(polycube: &Polycube, canonical_orig_enc: u128, limit_
 
 	let mut tried_canonicals: BTreeSet<u128> = BTreeSet::new();
 
-	// i'd like to not clone this, but that might not be possible
-	//let canonical_orig: CanonicalInfo = polycube.find_canonical_info().clone();
 	let mut canonical_try: &CanonicalInfo;
 	let mut least_significant_cube_pos: isize;
 
 	let mut tmp_add = polycube.copy();
+	let canonical_orig_enc: u128 = tmp_add.find_canonical_info(IMPOSSIBLE_POS).enc;
 
 	let mut try_pos: isize;
 
@@ -701,7 +698,7 @@ pub fn extend_and_delegate(polycube: &Polycube, canonical_orig_enc: u128, limit_
 					}
 				} else {
 					match extend_and_delegate(&mut tmp_add.copy(),
-							tmp_add.find_canonical_info(IMPOSSIBLE_POS).enc, limit_n, delegate_at_n,
+							limit_n, delegate_at_n,
 							submit_queue, response_queue, atomic_halt, rng) {
 						Some(futher_counts) => {
 							for i in 1..limit_n+1 {
@@ -736,7 +733,7 @@ pub fn extend_and_delegate(polycube: &Polycube, canonical_orig_enc: u128, limit_
 						}
 					} else {
 						match extend_and_delegate(&mut tmp_add.copy(),
-								tmp_add.find_canonical_info(IMPOSSIBLE_POS).enc, limit_n, delegate_at_n,
+								limit_n, delegate_at_n,
 								submit_queue, response_queue, atomic_halt, rng) {
 							Some(futher_counts) => {
 								for i in 1..limit_n+1 {
@@ -790,8 +787,6 @@ pub fn extend_as_worker(polycube: &mut Polycube, limit_n: u8,
 
 	let mut tried_canonicals: BTreeSet<u128> = BTreeSet::new();
 
-	// i'd like to not clone this, but that might not be possible
-	//let canonical_orig: CanonicalInfo = polycube.find_canonical_info(IMPOSSIBLE_POS).clone();
 	let canonical_orig_enc: u128 = polycube.find_canonical_info(IMPOSSIBLE_POS).enc;
 	let mut canonical_try: &CanonicalInfo;
 	let mut least_significant_cube_pos: isize;
@@ -907,8 +902,7 @@ pub fn extend_single_thread(polycube: &mut Polycube, limit_n: u8, depth: usize) 
 
 	let mut tried_canonicals: BTreeSet<u128> = BTreeSet::new();
 
-	// i'd like to not clone this, but that might not be possible
-	let canonical_orig: CanonicalInfo = polycube.find_canonical_info(IMPOSSIBLE_POS).clone();
+	let canonical_orig_enc: u128 = polycube.find_canonical_info(IMPOSSIBLE_POS).enc;
 	let mut canonical_try: &CanonicalInfo;
 	let mut least_significant_cube_pos: isize;
 
@@ -947,14 +941,14 @@ pub fn extend_single_thread(polycube: &mut Polycube, limit_n: u8, depth: usize) 
 			} else {
 				// remove the last of the ordered cubes in p+1
 				polycube.remove(least_significant_cube_pos);
-	
+
 				// if p+1-1 has the same canonical representation as p, count it as a new unique polycube
 				//   and continue recursion into that p+1
-				if polycube.find_canonical_info(IMPOSSIBLE_POS).enc == canonical_orig.enc {
+				if polycube.find_canonical_info(IMPOSSIBLE_POS).enc == canonical_orig_enc {
 					// replace the least significant cube we just removed
 					polycube.add(least_significant_cube_pos);
 					extend_single_thread(polycube,  limit_n, depth+1);
-	
+
 				// undo the temporary removal of the least significant cube,
 				//   but only if it's not the same as the cube we just tried
 				//   since we remove that one before going to the next iteration
