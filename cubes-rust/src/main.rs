@@ -382,7 +382,8 @@ impl Polycube {
 			rotations_index: usize,
 			mut offset: u8,
 			mut encoding: u128) -> Option<(isize, u128, u8)> {
-		encoding = (encoding << 6) + (ROTATION_TABLE[self.cube_info_by_pos[&start_cube_pos][6].unwrap() as usize][rotations_index] as u128);
+		let start_cube_info = self.cube_info_by_pos[&start_cube_pos];
+		encoding = (encoding << 6) + (ROTATION_TABLE[start_cube_info[6].unwrap() as usize][rotations_index] as u128);
 		// as soon as we can tell this is going to be an inferior encoding
 		//   (smaller int value than the given best known encofing)
 		//   we can stop right away
@@ -392,7 +393,7 @@ impl Polycube {
 		let mut least_sig_cube_pos = start_cube_pos;
 		included_cube_pos.insert(start_cube_pos);
 		for direction in rotation {
-			match self.cube_info_by_pos[&start_cube_pos][direction as usize] {
+			match start_cube_info[direction as usize] {
 				Some(neighbor_pos) => {
 					if included_cube_pos.contains(&neighbor_pos) {
 						continue;
