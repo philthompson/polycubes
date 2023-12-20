@@ -276,48 +276,6 @@ impl Polycube {
 		}
 	}
 
-	// add cubes at the given positions, where each position
-	//   is saved for later if it cannot be added (e.g if it
-	//   would have no neighbor)
-	pub fn add_all_pos(&mut self, pos_list: &Vec<isize>) {
-		let mut pos_remaining: BTreeSet<isize> = BTreeSet::new();
-		pos_remaining.extend(pos_list.iter());
-		let mut any_added = true;
-		while any_added {
-			any_added = false;
-			for pos in pos_list {
-				if pos_remaining.contains(pos) && self.can_add_at_pos(*pos) {
-					self.add(*pos);
-					pos_remaining.remove(pos);
-					any_added = true;
-				}
-			}
-		}
-		if !any_added && pos_remaining.len() > 0 {
-			panic!("add_all_pos() failed to add cubes at {:?} from the following pos_list:\n    {:?}", pos_remaining, pos_list);
-		}
-	}
-
-	// return true if the given position is not already occupied
-	//   by a cube and would have at least one neighbor
-	pub fn can_add_at_pos(&self, pos: isize) -> bool {
-		if self.n == 0 && pos == 0 {
-			return true;
-		}
-		// if this position is already occupied, return false
-		if self.cube_info_by_pos.contains_key(&pos) {
-			return false;
-		}
-		// if this position has no neighbors, return false
-		for direction in DIRECTIONS.iter() {
-			let neighbor_pos = pos + DIRECTION_COSTS[*direction];
-			if self.cube_info_by_pos.contains_key(&neighbor_pos) {
-				return true;
-			}
-		}
-		return false;
-	}
-
 	pub fn add(&mut self, pos: isize) {
 		let mut new_enc: isize = 0;
 		let mut new_info: [Option<isize>; 7] = [None, None, None, None, None, None, Some(0)];
@@ -603,6 +561,9 @@ pub fn extend_as_worker_outer(n: u8, atomic_halt: Arc<AtomicBool>, atomic_done: 
 			continue;
 		}
 		let mut polycube = polycube.unwrap();
+		// save a copy of the original polycube so we can
+		//   write it to disk if we are halted
+		let polycube_orig_clone = polycube.copy();
 		match extend_as_worker(
 				&mut polycube,
 				n,
@@ -630,7 +591,7 @@ pub fn extend_as_worker_outer(n: u8, atomic_halt: Arc<AtomicBool>, atomic_done: 
 			None => {
 				// stopped due to the halt
 				halted = true;
-				match response_queue.push(ThreadResponse{ job_complete: false, results: None, polycube: Some(polycube.copy()) }) {
+				match response_queue.push(ThreadResponse{ job_complete: false, results: None, polycube: Some(polycube_orig_clone) }) {
 					Ok(_) => {}
 					Err(_) => {
 						panic!("response_queue.push() failed");
@@ -1016,7 +977,14 @@ pub fn write_resume_file(n: u8, spawn_n: u8, polycubes_to_write_to_disk: Vec<Pol
 	let resume_file_path = create_executable_sibling_file(filename.as_str());
 	println!("writing {} polycubes to [{}]...", polycubes_to_write_to_disk.len(), resume_file_path.to_str().unwrap());
 	let mut file_buf = File::create(resume_file_path).unwrap();
-	let mut gz = GzEncoder::new(&mut file_buf, Compression::best());
+	// i am getting strange repeated/missing characters in the .gz file,
+	//   so i am trying a lower compression level
+	//let mut gz = GzEncoder::new(&mut file_buf, Compression::best());
+	// still getting errors at the default compression level
+	//let mut gz = GzEncoder::new(&mut file_buf, Compression::default());
+	// still getting errors at the fast compression level
+	//let mut gz = GzEncoder::new(&mut file_buf, Compression::fast());
+	let mut gz = GzEncoder::new(&mut file_buf, Compression::none());
 	match gz.write(format!("{}\n{}\n{}\n", n, spawn_n, elapsed_sec).as_bytes()) {
 		Ok(_) => {}
 		Err(err) => {
@@ -1038,7 +1006,18 @@ pub fn write_resume_file(n: u8, spawn_n: u8, polycubes_to_write_to_disk: Vec<Pol
 		}
 	}
 	for polycube in polycubes_to_write_to_disk.iter() {
-		match gz.write(format!("{}\n", polycube.cube_info_by_pos.keys().map(|pos| pos.to_string()).collect::<Vec<String>>().join(",")).as_bytes()) {
+		let cubes = polycube.cube_info_by_pos.keys().map(|pos| match pos.to_string().as_str() {
+			"--401" => {
+				panic!("the postion {} is generating a string of --401", pos);
+			}
+			_ => {
+				if pos.to_string().starts_with("--") {
+					panic!("the postion {} is generating a string of {}", pos, pos.to_string());
+				}
+				pos.to_string()
+			}
+		}).collect::<Vec<String>>().join(",");
+		match gz.write(format!("{}\n", cubes).as_bytes()) {
 			Ok(_) => {}
 			Err(err) => {
 				println!("error writing to resume file:\n{}", err);
@@ -1073,7 +1052,6 @@ pub fn read_resume_file(resume_file_path: &PathBuf)
 	let mut line: String = String::new();
 	let mut line_num: usize = 0;
 	let mut len: usize = 1;
-	//println!("reading resume file [{}]", resume_file_path.to_string_lossy());
 	while len > 0 {
 		line.clear();
 		len = buf.read_line(&mut line).expect(file_err_msg.as_str());
@@ -1106,12 +1084,15 @@ pub fn read_resume_file(resume_file_path: &PathBuf)
 			}
 		} else if line_num > 3 && line.len() > 0 {
 			// lines 5 and beyond are polycubes' cube positions, one polycube per line
-			//let p: Vec<isize> = line.split(',')
-			//		.map(|cube_pos| cube_pos.parse::<isize>().unwrap()).collect();
-			//polycubes_read.push(p);
-			//println!("using line [{}] as polycube cube positions", line);
-			polycubes_read.push(line.split(',')
-				.map(|cube_pos| cube_pos.parse::<isize>().unwrap()).collect());
+			let cubes = line.split(',')
+				.map(|cube_pos| match cube_pos.parse::<isize>(){
+					Ok(pos) => pos,
+					Err(_) => {
+						println!("error: invalid cube position [{}] in resume file at line {}" , cube_pos, line_num+1);
+						exit(1);
+					}
+				}).collect();
+			polycubes_read.push(cubes);
 		}
 		line_num += 1;
 	}
@@ -1343,7 +1324,9 @@ fn main() {
 			Some(_path) => {
 				for cubes in polycubes_to_resume.iter() {
 					let mut polycube = Polycube::new(false);
-					polycube.add_all_pos(cubes);
+					for cube_pos in cubes {
+						polycube.add(*cube_pos);
+					}
 					match submit_queue.push(polycube) {
 						Ok(_) => {}
 						Err(_) => {
