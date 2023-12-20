@@ -373,7 +373,196 @@ impl Polycube {
 		return self.cube_info_by_pos.values().map(|info| MAXIMUM_ROTATED_CUBE_VALUES[info[6].unwrap() as usize]).max().unwrap();
 	}
 
+	// same as make_encoding_recursive_loop(), but we've
+	//   unrolled the loop here
 	pub fn make_encoding_recursive(
+			&self,
+			start_cube_pos: isize,
+			rotation: [u8; 6],
+			included_cube_pos: &mut BTreeSet<isize>,
+			best_encoding: u128,
+			rotations_index: usize,
+			mut offset: u8,
+			mut encoding: u128) -> Option<(isize, u128, u8)> {
+		let start_cube_info = self.cube_info_by_pos[&start_cube_pos];
+		encoding = (encoding << 6) + (ROTATION_TABLE[start_cube_info[6].unwrap() as usize][rotations_index] as u128);
+		// as soon as we can tell this is going to be an inferior encoding
+		//   (smaller int value than the given best known encofing)
+		//   we can stop right away
+		if encoding < (best_encoding >> (offset * 6)) {
+			return None;
+		}
+		let mut least_sig_cube_pos = start_cube_pos;
+		included_cube_pos.insert(start_cube_pos);
+		// direction 0
+		match start_cube_info[rotation[0] as usize] {
+			Some(neighbor_pos) => {
+				if !included_cube_pos.contains(&neighbor_pos) {
+					match self.make_encoding_recursive(
+							neighbor_pos,
+							rotation,
+							included_cube_pos,
+							best_encoding,
+							rotations_index,
+							offset - 1,
+							encoding) {
+						Some((least_sig_cube_pos_new, encoding_ret, offset_ret)) => {
+							least_sig_cube_pos = least_sig_cube_pos_new;
+							encoding = encoding_ret;
+							offset = offset_ret;
+						}
+						// if the Option is empty, that means we have determined
+						//   somewhere deeper in the recursion that this is
+						//   a dead-end inferior encoding, so we can stop
+						None => { return None }
+					}
+				}
+			}
+			// if there is no neighbor in this direction just continue
+			None => {}
+		}
+		// direction 1
+		match start_cube_info[rotation[1] as usize] {
+			Some(neighbor_pos) => {
+				if !included_cube_pos.contains(&neighbor_pos) {
+					match self.make_encoding_recursive(
+							neighbor_pos,
+							rotation,
+							included_cube_pos,
+							best_encoding,
+							rotations_index,
+							offset - 1,
+							encoding) {
+						Some((least_sig_cube_pos_new, encoding_ret, offset_ret)) => {
+							least_sig_cube_pos = least_sig_cube_pos_new;
+							encoding = encoding_ret;
+							offset = offset_ret;
+						}
+						// if the Option is empty, that means we have determined
+						//   somewhere deeper in the recursion that this is
+						//   a dead-end inferior encoding, so we can stop
+						None => { return None }
+					}
+				}
+			}
+			// if there is no neighbor in this direction just continue
+			None => {}
+		}
+		// direction 2
+		match start_cube_info[rotation[2] as usize] {
+			Some(neighbor_pos) => {
+				if !included_cube_pos.contains(&neighbor_pos) {
+					match self.make_encoding_recursive(
+							neighbor_pos,
+							rotation,
+							included_cube_pos,
+							best_encoding,
+							rotations_index,
+							offset - 1,
+							encoding) {
+						Some((least_sig_cube_pos_new, encoding_ret, offset_ret)) => {
+							least_sig_cube_pos = least_sig_cube_pos_new;
+							encoding = encoding_ret;
+							offset = offset_ret;
+						}
+						// if the Option is empty, that means we have determined
+						//   somewhere deeper in the recursion that this is
+						//   a dead-end inferior encoding, so we can stop
+						None => { return None }
+					}
+				}
+			}
+			// if there is no neighbor in this direction just continue
+			None => {}
+		}
+		// direction 3
+		match start_cube_info[rotation[3] as usize] {
+			Some(neighbor_pos) => {
+				if !included_cube_pos.contains(&neighbor_pos) {
+					match self.make_encoding_recursive(
+							neighbor_pos,
+							rotation,
+							included_cube_pos,
+							best_encoding,
+							rotations_index,
+							offset - 1,
+							encoding) {
+						Some((least_sig_cube_pos_new, encoding_ret, offset_ret)) => {
+							least_sig_cube_pos = least_sig_cube_pos_new;
+							encoding = encoding_ret;
+							offset = offset_ret;
+						}
+						// if the Option is empty, that means we have determined
+						//   somewhere deeper in the recursion that this is
+						//   a dead-end inferior encoding, so we can stop
+						None => { return None }
+					}
+				}
+			}
+			// if there is no neighbor in this direction just continue
+			None => {}
+		}
+		// direction 4
+		match start_cube_info[rotation[4] as usize] {
+			Some(neighbor_pos) => {
+				if !included_cube_pos.contains(&neighbor_pos) {
+					match self.make_encoding_recursive(
+							neighbor_pos,
+							rotation,
+							included_cube_pos,
+							best_encoding,
+							rotations_index,
+							offset - 1,
+							encoding) {
+						Some((least_sig_cube_pos_new, encoding_ret, offset_ret)) => {
+							least_sig_cube_pos = least_sig_cube_pos_new;
+							encoding = encoding_ret;
+							offset = offset_ret;
+						}
+						// if the Option is empty, that means we have determined
+						//   somewhere deeper in the recursion that this is
+						//   a dead-end inferior encoding, so we can stop
+						None => { return None }
+					}
+				}
+			}
+			// if there is no neighbor in this direction just continue
+			None => {}
+		}
+		// direction 5
+		match start_cube_info[rotation[5] as usize] {
+			Some(neighbor_pos) => {
+				if !included_cube_pos.contains(&neighbor_pos) {
+					match self.make_encoding_recursive(
+							neighbor_pos,
+							rotation,
+							included_cube_pos,
+							best_encoding,
+							rotations_index,
+							offset - 1,
+							encoding) {
+						Some((least_sig_cube_pos_new, encoding_ret, offset_ret)) => {
+							least_sig_cube_pos = least_sig_cube_pos_new;
+							encoding = encoding_ret;
+							offset = offset_ret;
+						}
+						// if the Option is empty, that means we have determined
+						//   somewhere deeper in the recursion that this is
+						//   a dead-end inferior encoding, so we can stop
+						None => { return None }
+					}
+				}
+			}
+			// if there is no neighbor in this direction just continue
+			None => {}
+		}
+
+		return Some((least_sig_cube_pos, encoding, offset));
+	}
+
+	// this is the original loop that was unrolled above
+	//   in make_encoding_recursive()
+	pub fn make_encoding_recursive_loop(
 			&self,
 			start_cube_pos: isize,
 			rotation: [u8; 6],
