@@ -1,11 +1,32 @@
 
 ## Polycubes
 
-Python and Rust implementations of a hashtable-less polycube enumerator using the method described by presseyt (see link below).  The python implementation can run on multiple CPU cores and can be halted and resumed.
+Python and Rust implementations of a hashtable-less polycube enumerator using the method described by presseyt (see link below).  Both implementations can run on multiple CPU cores and can be halted and resumed.
 
-This can theoretically be run across multiple machines (sum their final counts to find the final answer) even by hand after splitting its written `.json.gz` file into multiple files.  (It's not worth pursuing this though with the python implementation!)
+This can theoretically be run across multiple machines (sum their final counts to find the final answer) even by hand after splitting its written `.txt.gz` file into multiple files.  (It's not worth pursuing this though with the python implementation!)
 
 ### Running
+
+#### Rust
+
+```
+cd cubes-rust
+cargo run --release -- --threads 7 --spawn-n 7 -n 11
+# on my M1 Mac, i'm using the nightly ARM toolchain:
+cargo +nightly-aarch64-apple-darwin run --release -- --threads 7 --spawn-n 7 -n 11
+```
+
+To halt (and save progress to a file):
+```
+touch target/release/halt-signal.txt
+```
+
+To resume from saved file:
+```
+cargo run --release -- --threads 7 --resume-from-file target/release/halt-n11-20231219T210637.txt.gz
+```
+
+#### Python
 
 ```
 python cubes.py --threads 4 -n 11
@@ -25,9 +46,11 @@ python cubes.py --threads 4 --resume-from-file halt-n11-20231209T075457.json.gz
 
 ### File Size
 
-With the default `--spawn-n 8`, 6922 polycubes are used for spawning threads.  If all of those 6922 are all written to disk for resuming later, the file will be about 28kb in size.
+Compressing the resume file currently only works with the python implementation, but this isn't a big concern for the rust implementation because the file sizes, even for `--spawn-n 11`, likely wouldn't be that large.
 
-With `--spawn-n 10`, 346543 polycubes are used for spawning threads.  If all of those 346543 are all written to disk for resuming later, the file will be about 1.4mb in size.
+With the default `--spawn-n 8`, 6922 polycubes are used for spawning threads.  If all of those 6922 are all written to disk for resuming later, the file will be about 28KB in size for python and 253KB for rust.
+
+With `--spawn-n 10`, 346543 polycubes are used for spawning threads.  If all of those 346543 are all written to disk for resuming later, the file will be about 1.4MB in size for python and 16MB for rust.
 
 ### Background
 
