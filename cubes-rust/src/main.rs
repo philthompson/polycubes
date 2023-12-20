@@ -276,6 +276,48 @@ impl Polycube {
 		}
 	}
 
+	// add cubes at the given positions, where each position
+	//   is saved for later if it cannot be added (e.g if it
+	//   would have no neighbor)
+	pub fn add_all_pos(&mut self, pos_list: &Vec<isize>) {
+		let mut pos_remaining: BTreeSet<isize> = BTreeSet::new();
+		pos_remaining.extend(pos_list.iter());
+		let mut any_added = true;
+		while any_added {
+			any_added = false;
+			for pos in pos_list {
+				if pos_remaining.contains(pos) && self.can_add_at_pos(*pos) {
+					self.add(*pos);
+					pos_remaining.remove(pos);
+					any_added = true;
+				}
+			}
+		}
+		if !any_added && pos_remaining.len() > 0 {
+			panic!("add_all_pos() failed to add cubes at {:?} from the following pos_list:\n    {:?}", pos_remaining, pos_list);
+		}
+	}
+
+	// return true if the given position is not already occupied
+	//   by a cube and would have at least one neighbor
+	pub fn can_add_at_pos(&self, pos: isize) -> bool {
+		if self.n == 0 && pos == 0 {
+			return true;
+		}
+		// if this position is already occupied, return false
+		if self.cube_info_by_pos.contains_key(&pos) {
+			return false;
+		}
+		// if this position has no neighbors, return false
+		for direction in DIRECTIONS.iter() {
+			let neighbor_pos = pos + DIRECTION_COSTS[*direction];
+			if self.cube_info_by_pos.contains_key(&neighbor_pos) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	pub fn add(&mut self, pos: isize) {
 		let mut new_enc: isize = 0;
 		let mut new_info: [Option<isize>; 7] = [None, None, None, None, None, None, Some(0)];
@@ -1301,9 +1343,7 @@ fn main() {
 			Some(_path) => {
 				for cubes in polycubes_to_resume.iter() {
 					let mut polycube = Polycube::new(false);
-					for cube_pos in cubes {
-						polycube.add(*cube_pos);
-					}
+					polycube.add_all_pos(cubes);
 					match submit_queue.push(polycube) {
 						Ok(_) => {}
 						Err(_) => {
@@ -1477,8 +1517,8 @@ fn main() {
 	if arg_resume_file.as_ref().is_none() {
 		println!("elapsed seconds: {}.{}", time_elapsed.as_secs(), time_elapsed.subsec_micros());
 	} else {
-		let time_elapsed = time_elapsed.as_secs_f64() + previous_total_elapsed_sec;
-		println!("elapsed seconds: {}", time_elapsed);
+		let total_time_elapsed = time_elapsed.as_secs_f64() + previous_total_elapsed_sec;
+		println!("elapsed seconds: {:.6} + {:.6} (previously) = {:.6}", time_elapsed.as_secs_f64(), previous_total_elapsed_sec, total_time_elapsed);
 	}
 
 }
