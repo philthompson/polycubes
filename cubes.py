@@ -146,8 +146,12 @@ def extend_as_worker_outer(n, halt_pipe_recv, done_pipe_recv, submit_queue, resp
 	# wait for work to arrive if halt hasn't been signalled yet
 	#while not halted and not submit_queue.empty():
 	while not halted:
+		polycube_orig = None
 		try:
 			polycube = submit_queue.get(block = True, timeout = 1.0)
+			# save a copy of the original polycube so we can
+			#   write it to disk if we are halted
+			polycube_orig = polycube.copy()
 			found_counts_by_n = extend_as_worker(
 				polycube=polycube,
 				limit_n=n,
@@ -161,7 +165,7 @@ def extend_as_worker_outer(n, halt_pipe_recv, done_pipe_recv, submit_queue, resp
 		except HaltSignal:
 			# we need to record the intitial polycube as unevaluated
 			#   (to be resumed later)
-			response_queue.put((False, polycube.copy()))
+			response_queue.put((False, polycube_orig))
 			halted = True
 
 	# after halt, drain the queue
