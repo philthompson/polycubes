@@ -403,8 +403,8 @@ impl Polycube {
 		// first remove the cube's data from our map
 		let cube_info = self.cube_info_by_pos.remove(&pos).unwrap();
 		// remove this cube from each of its neighbors
-		for dir in DIRECTIONS.iter() {
-			match cube_info[*dir] {
+		for (dir, neighbor_pos) in (&cube_info[0..6]).iter().enumerate() {
+			match neighbor_pos {
 				Some(neighbor_pos) => {
 					match self.cube_info_by_pos.get_mut(&neighbor_pos) {
 						Some(neighbor_info) => {
