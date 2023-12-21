@@ -120,6 +120,10 @@ Running times (in seconds) for `--threads 0 -n 11` on an M1 Mac mini:
 |  152.6 |    83.7 | 1831859 | use one BTreeSet for enc and neighbors |
 |  139.9 |    73.9 | 2bb422e | don't re-encode when try_pos==least significant |
 |   58.7 |    42.5 | 5c98245 | faster tracking for when try_pos is least significant |
+|   48.3 |    29.5 | 6de13f4 | cache start cube info when making encoding |
+|   47.4 |    26.8 | 1ad50b8 | loop unrolling for `make_encoding_recursive` |
+|   47.4 |    26.8 | adb3621 | loop unrolling for `Polycube.add` |
+|   46.5 |    26.8 | e11a43f | remove needless rotation cast |
 
 Running times (in seconds) for `--threads 7 --spawn-n 7 -n 11` on an M1 Mac mini:
 | x86_64 | aarch64 |  commit | note  |
@@ -128,8 +132,16 @@ Running times (in seconds) for `--threads 7 --spawn-n 7 -n 11` on an M1 Mac mini
 |   33.1 |    22.8 | 2bb422e | don't re-encode when try_pos==least significant |
 |   13.5 |    10.3 | 5c98245 | faster tracking for when try_pos is least significant |
 |   13.5 |    10.3 | 5525df3 | Workers use one Polycube instance |
+|   11.4 |     7.2 | 6de13f4 | cache `start_cube_info` when making encoding |
+|   10.2 |     6.2 | 1ad50b8 | loop unrolling for `make_encoding_recursive` |
+|   10.4 |     6.2 | adb3621 | loop unrolling for `Polycube.add` |
+|   10.4 |     6.2 | e11a43f | remove needless rotation cast |
 
 Running times (in seconds) for `--threads 7 --spawn-n 8 -n 12` on an M1 Mac mini:
 | x86_64 | aarch64 |  commit | note  |
 |   ---: |    ---: |  :---:  | :---: |
 |  122.4 |    90.3 | 5525df3 | Workers use one Polycube instance |
+|   99.4 |    62.2 | 6de13f4 | cache `start_cube_info` when making encoding |
+|   96.4 |    59.2 | 1ad50b8 | loop unrolling for `make_encoding_recursive` |
+|   96.3 |    58.2 | adb3621 | loop unrolling for `Polycube.add` |
+|   95.3 |    58.2 | e11a43f | remove needless rotation cast |
