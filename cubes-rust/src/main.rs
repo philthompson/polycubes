@@ -30,7 +30,7 @@ const DIRECTIONS: [usize; 6] = [0, 1, 2, 3, 4, 5];
 const DIRECTION_COSTS: [isize; 6] = [-1, 1, -100, 100, -10_000, 10_000];
 // each of the 24 possible rotations of a 3d object
 //  (where each value refers to one of the above directions)
-const ROTATIONS: [[u8; 6]; 24] = [
+const ROTATIONS: [[usize; 6]; 24] = [
 	[0,1,2,3,4,5], [0,1,3,2,5,4], [0,1,4,5,3,2], [0,1,5,4,2,3],
 	[1,0,2,3,5,4], [1,0,3,2,4,5], [1,0,4,5,2,3], [1,0,5,4,3,2],
 	[2,3,0,1,5,4], [2,3,1,0,4,5], [2,3,4,5,0,1], [2,3,5,4,1,0],
@@ -461,7 +461,7 @@ impl Polycube {
 	pub fn make_encoding_recursive(
 			&self,
 			start_cube_pos: isize,
-			rotation: [u8; 6],
+			rotation: [usize; 6],
 			included_cube_pos: &mut BTreeSet<isize>,
 			best_encoding: u128,
 			rotations_index: usize,
@@ -478,7 +478,7 @@ impl Polycube {
 		let mut least_sig_cube_pos = start_cube_pos;
 		included_cube_pos.insert(start_cube_pos);
 		// direction 0
-		match start_cube_info[rotation[0] as usize] {
+		match start_cube_info[rotation[0]] {
 			Some(neighbor_pos) => {
 				if !included_cube_pos.contains(&neighbor_pos) {
 					match self.make_encoding_recursive(
@@ -505,7 +505,7 @@ impl Polycube {
 			None => {}
 		}
 		// direction 1
-		match start_cube_info[rotation[1] as usize] {
+		match start_cube_info[rotation[1]] {
 			Some(neighbor_pos) => {
 				if !included_cube_pos.contains(&neighbor_pos) {
 					match self.make_encoding_recursive(
@@ -532,7 +532,7 @@ impl Polycube {
 			None => {}
 		}
 		// direction 2
-		match start_cube_info[rotation[2] as usize] {
+		match start_cube_info[rotation[2]] {
 			Some(neighbor_pos) => {
 				if !included_cube_pos.contains(&neighbor_pos) {
 					match self.make_encoding_recursive(
@@ -559,7 +559,7 @@ impl Polycube {
 			None => {}
 		}
 		// direction 3
-		match start_cube_info[rotation[3] as usize] {
+		match start_cube_info[rotation[3]] {
 			Some(neighbor_pos) => {
 				if !included_cube_pos.contains(&neighbor_pos) {
 					match self.make_encoding_recursive(
@@ -586,7 +586,7 @@ impl Polycube {
 			None => {}
 		}
 		// direction 4
-		match start_cube_info[rotation[4] as usize] {
+		match start_cube_info[rotation[4]] {
 			Some(neighbor_pos) => {
 				if !included_cube_pos.contains(&neighbor_pos) {
 					match self.make_encoding_recursive(
@@ -613,7 +613,7 @@ impl Polycube {
 			None => {}
 		}
 		// direction 5
-		match start_cube_info[rotation[5] as usize] {
+		match start_cube_info[rotation[5]] {
 			Some(neighbor_pos) => {
 				if !included_cube_pos.contains(&neighbor_pos) {
 					match self.make_encoding_recursive(
@@ -648,7 +648,7 @@ impl Polycube {
 	pub fn make_encoding_recursive_loop(
 			&self,
 			start_cube_pos: isize,
-			rotation: [u8; 6],
+			rotation: [usize; 6],
 			included_cube_pos: &mut BTreeSet<isize>,
 			best_encoding: u128,
 			rotations_index: usize,
@@ -665,7 +665,7 @@ impl Polycube {
 		let mut least_sig_cube_pos = start_cube_pos;
 		included_cube_pos.insert(start_cube_pos);
 		for direction in rotation {
-			match start_cube_info[direction as usize] {
+			match start_cube_info[direction] {
 				Some(neighbor_pos) => {
 					if included_cube_pos.contains(&neighbor_pos) {
 						continue;
