@@ -276,7 +276,90 @@ impl Polycube {
 		}
 	}
 
+	// same as add_loop() below but with the loop unrolled
 	pub fn add(&mut self, pos: isize) {
+		let mut new_enc: isize = 0;
+		let mut new_info: [Option<isize>; 7] = [None, None, None, None, None, None, Some(0)];
+
+		// update each of our cube's enc values for the default
+		//   rotation of [0,1,2,3,4,5]
+		// set the neighbors for the new cube and set it as a neighbor to those cubes
+
+		// direction = 0 -> direction cost = -1
+		let mut neighbor_pos = pos - 1;
+		match self.cube_info_by_pos.get_mut(&neighbor_pos) {
+			Some(neighbor_info) => {
+				new_info[0] = Some(neighbor_pos);
+				new_enc |= 32;
+				neighbor_info[1] = Some(pos);
+				neighbor_info[6] = Some(neighbor_info[6].unwrap() | 16);
+			}
+			None => {}
+		}
+		// direction = 1 -> direction cost = 1
+		neighbor_pos = pos + 1;
+		match self.cube_info_by_pos.get_mut(&neighbor_pos) {
+			Some(neighbor_info) => {
+				new_info[1] = Some(neighbor_pos);
+				new_enc |= 16;
+				neighbor_info[0] = Some(pos);
+				neighbor_info[6] = Some(neighbor_info[6].unwrap() | 32);
+			}
+			None => {}
+		}
+		// direction = 2 -> direction cost = -100
+		neighbor_pos = pos - 100;
+		match self.cube_info_by_pos.get_mut(&neighbor_pos) {
+			Some(neighbor_info) => {
+				new_info[2] = Some(neighbor_pos);
+				new_enc |= 8;
+				neighbor_info[3] = Some(pos);
+				neighbor_info[6] = Some(neighbor_info[6].unwrap() | 4);
+			}
+			None => {}
+		}
+		// direction = 3 -> direction cost = 100
+		neighbor_pos = pos + 100;
+		match self.cube_info_by_pos.get_mut(&neighbor_pos) {
+			Some(neighbor_info) => {
+				new_info[3] = Some(neighbor_pos);
+				new_enc |= 4;
+				neighbor_info[2] = Some(pos);
+				neighbor_info[6] = Some(neighbor_info[6].unwrap() | 8);
+			}
+			None => {}
+		}
+		// direction = 4 -> direction cost = -10000
+		neighbor_pos = pos - 10000;
+		match self.cube_info_by_pos.get_mut(&neighbor_pos) {
+			Some(neighbor_info) => {
+				new_info[4] = Some(neighbor_pos);
+				new_enc |= 2;
+				neighbor_info[5] = Some(pos);
+				neighbor_info[6] = Some(neighbor_info[6].unwrap() | 1);
+			}
+			None => {}
+		}
+		// direction = 5 -> direction cost = 10000
+		neighbor_pos = pos + 10000;
+		match self.cube_info_by_pos.get_mut(&neighbor_pos) {
+			Some(neighbor_info) => {
+				new_info[5] = Some(neighbor_pos);
+				new_enc |= 1;
+				neighbor_info[4] = Some(pos);
+				neighbor_info[6] = Some(neighbor_info[6].unwrap() | 2);
+			}
+			None => {}
+		}
+		// lastly, insert the new cube's encoded neighbors into our map
+		new_info[6] = Some(new_enc);
+		self.cube_info_by_pos.insert(pos, new_info);
+		self.n += 1;
+		self.canonical_info = None;
+	}
+
+	// this is the original loop that was unrolled above in add()
+	pub fn add_loop(&mut self, pos: isize) {
 		let mut new_enc: isize = 0;
 		let mut new_info: [Option<isize>; 7] = [None, None, None, None, None, None, Some(0)];
 
