@@ -260,7 +260,6 @@ impl Polycube {
 					canonical_info: Some(CanonicalInfo {
 						enc: canonical_info.enc,
 						least_significant_cube_pos: canonical_info.least_significant_cube_pos.clone(),
-						//max_cube_values: canonical_info.max_cube_values.clone()
 						max_cube_value: canonical_info.max_cube_value
 					}),
 					cube_info_by_pos: self.cube_info_by_pos.clone()
@@ -766,6 +765,49 @@ impl Polycube {
 		}
 		return self.canonical_info.as_ref().unwrap();
 	}
+
+	// when we are looking for an encoding at least as large as the target,
+	//   we can ignore all smaller encodings
+	// this DOES NOT set the actual encoding for the polycube if smaller
+	//   than the target, so it's only useful e.g. when checking if P+A-B=P
+	pub fn find_canonical_info_with_target(&mut self, target_encoding: u128) -> &CanonicalInfo {
+		// leave default enc as 0 so we fail the P+A-B=P check if we
+		//   don't find an encoding at least as large as the target
+		let mut canonical = CanonicalInfo {
+			enc: 0,
+			least_significant_cube_pos: IMPOSSIBLE_POS,
+			max_cube_value: self.find_maximum_cube_value()
+		};
+		let mut best_encoding: u128 = target_encoding;
+		for (cube_pos, cube_info) in self.cube_info_by_pos.iter() {
+			let cube_enc = cube_info[6].unwrap() as usize;
+			// there could be more than one cube with the maximum rotated value
+			if MAXIMUM_ROTATED_CUBE_VALUES[cube_enc] < canonical.max_cube_value {
+				continue;
+			}
+			for rotations_index in MAXIMUM_CUBE_ROTATION_INDICES[cube_enc].iter() {
+				match self.make_encoding(*cube_pos, *rotations_index as usize, best_encoding) {
+					Some((encoding, least_significant_cube_pos)) => {
+						if encoding >= best_encoding {
+							canonical.enc = encoding;
+							canonical.least_significant_cube_pos = least_significant_cube_pos;
+							best_encoding = encoding;
+						}
+					}
+					// if the Option is empty, that means we have determined
+					//   somewhere in the recursion that this is a dead-end
+					//   inferior encoding, so we can try the next rotation
+					None => {
+						continue;
+					}
+				}
+			}
+		}
+		// we shouldn't need to actually set this here, but it was a quick
+		//   way to return an &CanonicalInfo to satisfy the compiler
+		self.canonical_info = Some(canonical);
+		return self.canonical_info.as_ref().unwrap();
+	}
 }
 
 static mut N_COUNTS: [usize; 23] = [0; 23];
@@ -990,7 +1032,7 @@ pub fn extend_and_delegate(polycube: &Polycube, limit_n: u8, delegate_at_n: u8,
 				tmp_add.remove(least_significant_cube_pos);
 				// if p+1-1 has the same canonical representation as p, count p+1 as a new unique polycube
 				//   and continue recursion into that p+1
-				if tmp_add.find_canonical_info(IMPOSSIBLE_POS).enc == canonical_orig_enc {
+				if tmp_add.find_canonical_info_with_target(canonical_orig_enc).enc == canonical_orig_enc {
 					// replace the least significant cube we just removed
 					tmp_add.add(least_significant_cube_pos);
 					found_counts_by_n[tmp_add.n as usize] += 1;
@@ -1123,7 +1165,7 @@ pub fn extend_as_worker(polycube: &mut Polycube, limit_n: u8,
 				polycube.remove(least_significant_cube_pos);
 				// if p+1-1 has the same canonical representation as p, count p+1 as a new unique polycube
 				//   and continue recursion into that p+1
-				if polycube.find_canonical_info(IMPOSSIBLE_POS).enc == canonical_orig_enc {
+				if polycube.find_canonical_info_with_target(canonical_orig_enc).enc == canonical_orig_enc {
 					// replace the least significant cube we just removed
 					polycube.add(least_significant_cube_pos);
 					found_counts_by_n[polycube.n as usize] += 1;
@@ -1217,7 +1259,7 @@ pub fn extend_single_thread(polycube: &mut Polycube, limit_n: u8, depth: usize) 
 
 				// if p+1-1 has the same canonical representation as p, count it as a new unique polycube
 				//   and continue recursion into that p+1
-				if polycube.find_canonical_info(IMPOSSIBLE_POS).enc == canonical_orig_enc {
+				if polycube.find_canonical_info_with_target(canonical_orig_enc).enc == canonical_orig_enc {
 					// replace the least significant cube we just removed
 					polycube.add(least_significant_cube_pos);
 					extend_single_thread(polycube,  limit_n, depth+1);
@@ -1229,7 +1271,6 @@ pub fn extend_single_thread(polycube: &mut Polycube, limit_n: u8, depth: usize) 
 				} else {
 					polycube.add(least_significant_cube_pos);
 				}
-
 			}
 
 			// revert creating p+1 to try adding a cube at another position
