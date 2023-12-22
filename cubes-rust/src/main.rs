@@ -979,6 +979,10 @@ pub fn extend_and_delegate(polycube: &Polycube, limit_n: u8, delegate_at_n: u8,
 	for cube_pos in polycube.cube_info_by_pos.keys() {
 		for direction_cost in DIRECTION_COSTS {
 			try_pos = cube_pos + direction_cost;
+			// skip if P already contains A
+			if polycube.cube_info_by_pos.contains_key(&try_pos) {
+				continue;
+			}
 			// skip if we've already tried this position
 			if !tried_pos.insert(try_pos) {
 				continue;
@@ -1127,6 +1131,10 @@ pub fn extend_as_worker(polycube: &mut Polycube, limit_n: u8,
 	for cube_pos in original_positions {
 		for direction_cost in DIRECTION_COSTS {
 			try_pos = cube_pos + direction_cost;
+			// skip if P already contains A
+			if polycube.cube_info_by_pos.contains_key(&try_pos) {
+				continue;
+			}
 			// skip if we've already tried this position
 			if !tried_pos.insert(try_pos) {
 				continue;
@@ -1238,6 +1246,10 @@ pub fn extend_single_thread(polycube: &mut Polycube, limit_n: u8, depth: usize) 
 	for cube_pos in original_positions {
 		for direction_cost in DIRECTION_COSTS {
 			try_pos = cube_pos + direction_cost;
+			// skip if P already contains A
+			if polycube.cube_info_by_pos.contains_key(&try_pos) {
+				continue;
+			}
 			// skip if we've already tried this position
 			if !tried_pos.insert(try_pos) {
 				continue;
