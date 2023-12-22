@@ -642,6 +642,77 @@ impl Polycube {
 		return Some((least_sig_cube_pos, encoding, offset));
 	}
 
+	// this is an iterative version of make_encoding_recursive(),
+	//   which surprisingly runs slower than the recursive version
+	pub fn make_encoding_iterative(
+			&self,
+			start_cube_pos: isize,
+			best_encoding: u128,
+			rotations_index: usize) -> Option<(isize, u128, u8)> {
+
+		let mut included_cube_pos: BTreeSet<isize> = BTreeSet::new();
+		let rotation = ROTATIONS[rotations_index];
+		let mut offset: u8 = self.n - 1;
+		let mut encoding: u128 = 0;
+		let mut least_sig_cube_pos = start_cube_pos;
+		let mut cube_info: [Option<isize>; 7];
+		let rot_0 = rotation[0];
+		let rot_1 = rotation[1];
+		let rot_2 = rotation[2];
+		let rot_3 = rotation[3];
+		let rot_4 = rotation[4];
+		let rot_5 = rotation[5];
+
+		let mut stack = Vec::with_capacity((self.n * 7) as usize);
+		stack.push(start_cube_pos);
+		//stack.push_within_capacity(start_cube_pos);
+
+		while let Some(cube_pos) = stack.pop() {
+			if !included_cube_pos.insert(cube_pos) {
+				continue;
+			}
+			cube_info = self.cube_info_by_pos[&cube_pos];
+			encoding = (encoding << 6) + (ROTATION_TABLE[cube_info[6].unwrap() as usize][rotations_index] as u128);
+			// as soon as we can tell this is going to be an inferior encoding
+			//   (smaller int value than the given best known encofing)
+			//   we can stop right away
+			if encoding < (best_encoding >> (offset * 6)) {
+				return None;
+			}
+			offset -= 1;
+			least_sig_cube_pos = cube_pos;
+
+			// reverse the iterator here so that directions are
+			//   popped off the stack in the expected order
+			match cube_info[rot_5] {
+				Some(neighbor_pos) => { stack.push(neighbor_pos); }
+				// if there is no neighbor in this direction just continue
+				None => {}
+			}
+			match cube_info[rot_4] {
+				Some(neighbor_pos) => { stack.push(neighbor_pos); }
+				None => {}
+			}
+			match cube_info[rot_3] {
+				Some(neighbor_pos) => { stack.push(neighbor_pos); }
+				None => {}
+			}
+			match cube_info[rot_2] {
+				Some(neighbor_pos) => { stack.push(neighbor_pos); }
+				None => {}
+			}
+			match cube_info[rot_1] {
+				Some(neighbor_pos) => { stack.push(neighbor_pos); }
+				None => {}
+			}
+			match cube_info[rot_0] {
+				Some(neighbor_pos) => { stack.push(neighbor_pos); }
+				None => {}
+			}
+		}
+		return Some((least_sig_cube_pos, encoding, offset));
+	}
+
 	// this is the original loop that was unrolled above
 	//   in make_encoding_recursive()
 	pub fn make_encoding_recursive_loop(
@@ -698,9 +769,27 @@ impl Polycube {
 	}
 
 	pub fn make_encoding(&self, start_cube_pos: isize, rotations_index: usize, best_encoding: u128) -> Option<(u128, isize)> {
-		let mut included_cube_pos: BTreeSet<isize> = BTreeSet::new();
+
+//		// uses an iterative depth-first encoding of all cubes, using
+//		//   the provided rotation's order to traverse the cubes
+//		match self.make_encoding_iterative(
+//				start_cube_pos,
+//				best_encoding,
+//				rotations_index) {
+//			Some((least_sig_cube_pos, encoding, _offset)) => {
+//				return Some((encoding, least_sig_cube_pos));
+//			}
+//			// if the Option is empty, that means we have determined
+//			//   somewhere deeper in the recursion that this is
+//			//   a dead-end inferior encoding, so we can stop
+//			None => {
+//				return None;
+//			}
+//		}
+
 		// uses a recursive depth-first encoding of all cubes, using
 		//   the provided rotation's order to traverse the cubes
+		let mut included_cube_pos: BTreeSet<isize> = BTreeSet::new();
 		match self.make_encoding_recursive(
 				start_cube_pos,
 				ROTATIONS[rotations_index],
