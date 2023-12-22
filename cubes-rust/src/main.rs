@@ -770,7 +770,7 @@ impl Polycube {
 	//   we can ignore all smaller encodings
 	// this DOES NOT set the actual encoding for the polycube if smaller
 	//   than the target, so it's only useful e.g. when checking if P+A-B=P
-	pub fn find_canonical_info_with_target(&mut self, target_encoding: u128) -> &CanonicalInfo {
+	pub fn find_canonical_enc_with_target(&mut self, target_encoding: u128) -> u128 {
 		// leave default enc as 0 so we fail the P+A-B=P check if we
 		//   don't find an encoding at least as large as the target
 		let mut canonical = CanonicalInfo {
@@ -803,10 +803,7 @@ impl Polycube {
 				}
 			}
 		}
-		// we shouldn't need to actually set this here, but it was a quick
-		//   way to return an &CanonicalInfo to satisfy the compiler
-		self.canonical_info = Some(canonical);
-		return self.canonical_info.as_ref().unwrap();
+		return canonical.enc;
 	}
 }
 
@@ -961,6 +958,7 @@ pub fn extend_and_delegate(polycube: &Polycube, limit_n: u8, delegate_at_n: u8,
 	let mut tried_canonicals: BTreeSet<u128> = BTreeSet::new();
 
 	let mut canonical_try: &CanonicalInfo;
+	let mut canonical_try_clone: CanonicalInfo;
 	let mut least_significant_cube_pos: isize;
 
 	let mut tmp_add = polycube.copy();
@@ -1028,15 +1026,17 @@ pub fn extend_and_delegate(polycube: &Polycube, limit_n: u8, delegate_at_n: u8,
 					}
 				}
 			} else {
+				canonical_try_clone = canonical_try.clone();
 				// remove the last of the ordered cubes in p+1
 				tmp_add.remove(least_significant_cube_pos);
 				// if p+1-1 has the same canonical representation as p, count p+1 as a new unique polycube
 				//   and continue recursion into that p+1
-				if tmp_add.find_canonical_info_with_target(canonical_orig_enc).enc == canonical_orig_enc {
+				if tmp_add.find_canonical_enc_with_target(canonical_orig_enc) == canonical_orig_enc {
 					// replace the least significant cube we just removed
 					tmp_add.add(least_significant_cube_pos);
+					// replace the canonical info from before
+					tmp_add.canonical_info = Some(canonical_try_clone);
 					found_counts_by_n[tmp_add.n as usize] += 1;
-
 					// the initial delegator submits jobs for threads,
 					//   but only if the found polycube has n=spawn_n
 					if tmp_add.n == delegate_at_n {
@@ -1104,6 +1104,7 @@ pub fn extend_as_worker(polycube: &mut Polycube, limit_n: u8,
 
 	let canonical_orig_enc: u128 = polycube.find_canonical_info(IMPOSSIBLE_POS).enc;
 	let mut canonical_try: &CanonicalInfo;
+	let mut canonical_try_clone: CanonicalInfo;
 	let mut least_significant_cube_pos: isize;
 
 	let mut try_pos: isize;
@@ -1161,14 +1162,18 @@ pub fn extend_as_worker(polycube: &mut Polycube, limit_n: u8,
 					}
 				}
 			} else {
+				canonical_try_clone = canonical_try.clone();
 				// remove the last of the ordered cubes in p+1
 				polycube.remove(least_significant_cube_pos);
 				// if p+1-1 has the same canonical representation as p, count p+1 as a new unique polycube
 				//   and continue recursion into that p+1
-				if polycube.find_canonical_info_with_target(canonical_orig_enc).enc == canonical_orig_enc {
+				if polycube.find_canonical_enc_with_target(canonical_orig_enc) == canonical_orig_enc {
 					// replace the least significant cube we just removed
 					polycube.add(least_significant_cube_pos);
+					// replace the canonical info from before
+					polycube.canonical_info = Some(canonical_try_clone);
 					found_counts_by_n[polycube.n as usize] += 1;
+					// continue recursion
 					match extend_as_worker(polycube, limit_n,
 							submit_queue, response_queue, atomic_halt, rng) {
 						Some(futher_counts) => {
@@ -1219,6 +1224,7 @@ pub fn extend_single_thread(polycube: &mut Polycube, limit_n: u8, depth: usize) 
 
 	let canonical_orig_enc: u128 = polycube.find_canonical_info(IMPOSSIBLE_POS).enc;
 	let mut canonical_try: &CanonicalInfo;
+	let mut canonical_try_clone: CanonicalInfo;
 	let mut least_significant_cube_pos: isize;
 
 	let mut try_pos: isize;
@@ -1254,14 +1260,17 @@ pub fn extend_single_thread(polycube: &mut Polycube, limit_n: u8, depth: usize) 
 			if least_significant_cube_pos == try_pos {
 				extend_single_thread(polycube,  limit_n, depth+1);
 			} else {
+				canonical_try_clone = canonical_try.clone();
 				// remove the last of the ordered cubes in p+1
 				polycube.remove(least_significant_cube_pos);
-
 				// if p+1-1 has the same canonical representation as p, count it as a new unique polycube
 				//   and continue recursion into that p+1
-				if polycube.find_canonical_info_with_target(canonical_orig_enc).enc == canonical_orig_enc {
+				if polycube.find_canonical_enc_with_target(canonical_orig_enc) == canonical_orig_enc {
 					// replace the least significant cube we just removed
 					polycube.add(least_significant_cube_pos);
+					// replace the canonical info from before
+					polycube.canonical_info = Some(canonical_try_clone);
+					// continue recursion
 					extend_single_thread(polycube,  limit_n, depth+1);
 
 				// undo the temporary removal of the least significant cube,
