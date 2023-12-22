@@ -861,7 +861,7 @@ pub fn extend_as_worker_outer(n: u8, atomic_halt: Arc<AtomicBool>, atomic_done: 
 	while !halted {
 		let polycube = submit_queue.pop();
 		if polycube.is_none() {
-			thread::sleep(Duration::from_millis(100));
+			thread::sleep(Duration::from_millis(rng.gen_range(25..75)));
 			// check if we've been halted or if we are done
 			if atomic_halt.load(Ordering::Relaxed) || atomic_done.load(Ordering::Relaxed) {
 				halted = true;
@@ -984,10 +984,10 @@ pub fn extend_and_delegate(polycube: &Polycube, limit_n: u8, delegate_at_n: u8,
 				continue;
 			}
 
-			// create p+1
+			// create P+A
 			tmp_add.add(try_pos);
 
-			// skip if we've already seen some p+1 with the same canonical representation
+			// skip if we've already seen some P+A with the same canonical representation
 			//   (comparing the bitwise int only)
 			canonical_try = tmp_add.find_canonical_info(try_pos);
 			if !tried_canonicals.insert(canonical_try.enc) {
@@ -997,7 +997,7 @@ pub fn extend_and_delegate(polycube: &Polycube, limit_n: u8, delegate_at_n: u8,
 
 			least_significant_cube_pos = canonical_try.least_significant_cube_pos;
 
-			// if try_pos is the least significant, then p+1-1==p and p+1 is a new unique polycube
+			// if try_pos (cube A) is the least significant, then P+A-A==P and P+A is a new unique polycube
 			if least_significant_cube_pos == try_pos {
 				found_counts_by_n[tmp_add.n as usize] += 1;
 				// the initial delegator submits jobs for threads,
@@ -1027,10 +1027,10 @@ pub fn extend_and_delegate(polycube: &Polycube, limit_n: u8, delegate_at_n: u8,
 				}
 			} else {
 				canonical_try_clone = canonical_try.clone();
-				// remove the last of the ordered cubes in p+1
+				// remove the last of the ordered cubes (cube B) in P+A
 				tmp_add.remove(least_significant_cube_pos);
-				// if p+1-1 has the same canonical representation as p, count p+1 as a new unique polycube
-				//   and continue recursion into that p+1
+				// if P+A-B has the same canonical representation as P, count P+A as a new unique polycube
+				//   and continue recursion into that P+A
 				if tmp_add.find_canonical_enc_with_target(canonical_orig_enc) == canonical_orig_enc {
 					// replace the least significant cube we just removed
 					tmp_add.add(least_significant_cube_pos);
@@ -1072,7 +1072,7 @@ pub fn extend_and_delegate(polycube: &Polycube, limit_n: u8, delegate_at_n: u8,
 				}
 			}
 
-			// revert creating p+1 to try adding a cube at another position
+			// revert creating P+A to try adding a cube at another position
 			tmp_add.remove(try_pos);
 		}
 	}
@@ -1132,7 +1132,7 @@ pub fn extend_as_worker(polycube: &mut Polycube, limit_n: u8,
 				continue;
 			}
 
-			// create p+1
+			// create P+A
 			polycube.add(try_pos);
 
 			// skip if we've already seen some p+1 with the same canonical representation
@@ -1145,7 +1145,7 @@ pub fn extend_as_worker(polycube: &mut Polycube, limit_n: u8,
 
 			least_significant_cube_pos = canonical_try.least_significant_cube_pos;
 
-			// if try_pos is the least significant, then p+1-1==p and p+1 is a new unique polycube
+			// if try_pos (cube A) is the least significant, then P+A-A==P and P+A is a new unique polycube
 			if least_significant_cube_pos == try_pos {
 				found_counts_by_n[polycube.n as usize] += 1;
 				match extend_as_worker(polycube, limit_n,
@@ -1163,10 +1163,10 @@ pub fn extend_as_worker(polycube: &mut Polycube, limit_n: u8,
 				}
 			} else {
 				canonical_try_clone = canonical_try.clone();
-				// remove the last of the ordered cubes in p+1
+				// remove the last of the ordered cubes (cube B) in P+A
 				polycube.remove(least_significant_cube_pos);
-				// if p+1-1 has the same canonical representation as p, count p+1 as a new unique polycube
-				//   and continue recursion into that p+1
+				// if P+A-B has the same canonical representation as P, count P+A as a new unique polycube
+				//   and continue recursion into that P+A
 				if polycube.find_canonical_enc_with_target(canonical_orig_enc) == canonical_orig_enc {
 					// replace the least significant cube we just removed
 					polycube.add(least_significant_cube_pos);
@@ -1197,7 +1197,7 @@ pub fn extend_as_worker(polycube: &mut Polycube, limit_n: u8,
 				}
 			}
 
-			// revert creating p+1 to try adding a cube at another position
+			// revert creating P+A to try adding a cube at another position
 			polycube.remove(try_pos);
 		}
 	}
@@ -1243,10 +1243,10 @@ pub fn extend_single_thread(polycube: &mut Polycube, limit_n: u8, depth: usize) 
 				continue;
 			}
 
-			// create p+1
+			// create P+A
 			polycube.add(try_pos);
 
-			// skip if we've already seen some p+1 with the same canonical representation
+			// skip if we've already seen some P+A with the same canonical representation
 			//   (comparing the bitwise int only)
 			canonical_try = polycube.find_canonical_info(try_pos);
 			if !tried_canonicals.insert(canonical_try.enc) {
@@ -1256,15 +1256,15 @@ pub fn extend_single_thread(polycube: &mut Polycube, limit_n: u8, depth: usize) 
 
 			least_significant_cube_pos = canonical_try.least_significant_cube_pos;
 
-			// if try_pos is the least significant, then p+1-1==p and p+1 is a new unique polycube
+			// if try_pos (cube A) is the least significant, then P+A-A==P and P+A is a new unique polycube
 			if least_significant_cube_pos == try_pos {
 				extend_single_thread(polycube,  limit_n, depth+1);
 			} else {
 				canonical_try_clone = canonical_try.clone();
-				// remove the last of the ordered cubes in p+1
+				// remove the last of the ordered cubes (cube B) in P+A
 				polycube.remove(least_significant_cube_pos);
-				// if p+1-1 has the same canonical representation as p, count it as a new unique polycube
-				//   and continue recursion into that p+1
+				// if P+A-B has the same canonical representation as P, count it as a new unique polycube
+				//   and continue recursion into that P+A
 				if polycube.find_canonical_enc_with_target(canonical_orig_enc) == canonical_orig_enc {
 					// replace the least significant cube we just removed
 					polycube.add(least_significant_cube_pos);
@@ -1282,7 +1282,7 @@ pub fn extend_single_thread(polycube: &mut Polycube, limit_n: u8, depth: usize) 
 				}
 			}
 
-			// revert creating p+1 to try adding a cube at another position
+			// revert creating P+A to try adding a cube at another position
 			polycube.remove(try_pos);
 		}
 	}

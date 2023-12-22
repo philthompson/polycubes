@@ -236,7 +236,7 @@ def extend_and_delegate(*, polycube, limit_n, delegate_at_n, submit_queue, respo
 
 			least_significant_cube_pos = canonical_try[1]
 
-			# if try_pos is the least significant, then p+1-1 is a new unique polycube
+			# if try_pos (cube A) is the least significant, then P+A-A is a new unique polycube
 			#   (use "is" here for faster comparison, since both are integers)
 			if least_significant_cube_pos == try_pos:
 				# allow the found polycube to be counted elsewhere
@@ -259,11 +259,11 @@ def extend_and_delegate(*, polycube, limit_n, delegate_at_n, submit_queue, respo
 						found_counts_by_n[n] += count
 
 			else:
-				# remove the last of the ordered cubes in p+1
+				# remove the last of the ordered cubes (cube B) in P+A
 				tmp_add.remove(pos=least_significant_cube_pos)
 
-				# if p+1-1 has the same canonical representation as p, count it as a new unique polycube
-				#   and continue recursion into that p+1
+				# if P+A-B has the same canonical representation as P, count it as a new unique polycube
+				#   and continue recursion into that P+A
 				if tmp_add.find_canonical_info()[0] == canonical_orig[0]:
 					# replace the least significant cube we just removed
 					tmp_add.add(pos=least_significant_cube_pos)
@@ -289,7 +289,7 @@ def extend_and_delegate(*, polycube, limit_n, delegate_at_n, submit_queue, respo
 				else:
 					tmp_add.add(pos=least_significant_cube_pos)
 
-			# revert creating p+1 to try adding a cube at another position
+			# revert creating P+A to try adding a cube at another position
 			tmp_add.remove(pos=try_pos)
 
 	return found_counts_by_n
@@ -352,7 +352,7 @@ def extend_as_worker(*, polycube, limit_n, submit_queue, response_queue, halt_pi
 
 			least_significant_cube_pos = canonical_try[1]
 
-			# if try_pos is the least significant, then p+1-1 is a new unique polycube
+			# if try_pos (cube A) is the least significant, then P+A-A is a new unique polycube
 			#   (use "is" here for faster comparison, since both are integers)
 			if least_significant_cube_pos == try_pos:
 				# allow the found polycube to be counted elsewhere
@@ -369,11 +369,11 @@ def extend_as_worker(*, polycube, limit_n, submit_queue, response_queue, halt_pi
 					found_counts_by_n[n] += count
 
 			else:
-				# remove the last of the ordered cubes in p+1
+				# remove the last of the ordered cubes (cube B) in P+A
 				polycube.remove(pos=least_significant_cube_pos)
 
-				# if p+1-1 has the same canonical representation as p, count it as a new unique polycube
-				#   and continue recursion into that p+1
+				# if P+A-B has the same canonical representation as P, count it as a new unique polycube
+				#   and continue recursion into that P+A
 				if polycube.find_canonical_info()[0] == canonical_orig[0]:
 					# replace the least significant cube we just removed
 					polycube.add(pos=least_significant_cube_pos)
@@ -393,7 +393,7 @@ def extend_as_worker(*, polycube, limit_n, submit_queue, response_queue, halt_pi
 				else:
 					polycube.add(pos=least_significant_cube_pos)
 
-			# revert creating p+1 to try adding a cube at another position
+			# revert creating P+A to try adding a cube at another position
 			polycube.remove(pos=try_pos)
 
 	return found_counts_by_n
@@ -446,23 +446,25 @@ def extend_single_thread(*, polycube, limit_n):
 
 			least_significant_cube_pos = canonical_try[1]
 
-			# if try_pos is the least significant, then p+1-1==p and p+1 is a new unique polycube
+			# if try_pos (cube A) is the least significant, then p+1-1==p and p+1 is a new unique polycube
 			if least_significant_cube_pos == try_pos:
+				#print(f"{' ' * (depth * 4)}p.n={polycube.n-1}, adding @[{try_pos}]")
 				extend_single_thread(polycube=polycube, limit_n=limit_n)
 
 			else:
-				# remove the last of the ordered cubes in p+1
+				# remove the last of the ordered cubes (cube B) in P+A
 				polycube.remove(pos=least_significant_cube_pos)
-				# if p+1-1 has the same canonical representation as p, count p+1 as a new unique polycube
-				#   and continue recursion into that p+1
+				# if P+A-B has the same canonical representation as P, count p+1 as a new unique polycube
+				#   and continue recursion into that P+A
 				if polycube.find_canonical_info()[0] == canonical_orig[0]:
 					# replace the least significant cube we just removed
 					polycube.add(pos=least_significant_cube_pos)
+					#print(f"{' ' * (depth * 4)}p.n={polycube.n-1}, adding @[{try_pos}]")
 					extend_single_thread(polycube=polycube, limit_n=limit_n)
 				else:
 					polycube.add(pos=least_significant_cube_pos)
 
-			# revert creating p+1 to try adding a cube at another position
+			# revert creating P+A to try adding a cube at another position
 			polycube.remove(pos=try_pos)
 
 class Polycube:
