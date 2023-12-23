@@ -202,7 +202,8 @@ const IMPOSSIBLE_POS: isize = 50;
 pub struct ThreadResponse {
 	pub job_complete: bool,
 	pub results: Option<[usize; MAX_N]>,
-	pub polycube: Option<Polycube>
+	pub orig_polycube: Option<Polycube>,
+	pub final_polycube_encs: Vec<u128>
 }
 pub struct CanonicalInfo {
 	// at 6 bits per cube, 128 bits is enough room for a polycube of
@@ -922,7 +923,11 @@ pub fn extend_and_delegate_outer(polycube: &mut Polycube, n: u8, atomic_halt: Ar
 					None => {}
 				}
 			}
-			match response_queue.push(ThreadResponse{ job_complete: true, results: Some(all_n_counts), polycube: None }) {
+			match response_queue.push(ThreadResponse{
+					job_complete: true,
+					results: Some(all_n_counts),
+					orig_polycube: None,
+					final_polycube_encs: Vec::new() }) {
 				Ok(_) => {}
 				Err(_) => {
 					panic!("response_queue.push() failed");
@@ -932,7 +937,11 @@ pub fn extend_and_delegate_outer(polycube: &mut Polycube, n: u8, atomic_halt: Ar
 		None => {
 			// indicate that the initial delegator worker was
 			//   halted with a special-case results=None and polycube=None here
-			match response_queue.push(ThreadResponse{ job_complete: false, results: None, polycube: None }) {
+			match response_queue.push(ThreadResponse{
+					job_complete: false,
+					results: None,
+					orig_polycube: None,
+					final_polycube_encs: Vec::new() }) {
 				Ok(_) => {}
 				Err(_) => {
 					panic!("response_queue.push() failed");
@@ -942,34 +951,50 @@ pub fn extend_and_delegate_outer(polycube: &mut Polycube, n: u8, atomic_halt: Ar
 	}
 }
 
-pub fn extend_as_worker_outer(n: u8, atomic_halt: Arc<AtomicBool>, atomic_done: Arc<AtomicBool>,
-		submit_queue: Arc<ArrayQueue<Polycube>>, response_queue: Arc<ArrayQueue<ThreadResponse>>) {
+pub fn extend_as_worker_outer(
+		n: u8,
+		atomic_halt: Arc<AtomicBool>,
+		atomic_done: Arc<AtomicBool>,
+		atomic_waiting: Arc<AtomicBool>,
+		submit_queue: Arc<ArrayQueue<Polycube>>,
+		response_queue: Arc<ArrayQueue<ThreadResponse>>,
+		save_final_polycubes: bool) {
 	let mut halted = false;
 	// thread-local random generator
 	let mut rng = thread_rng();
+	// by default, we are not signalling that this worker
+	//   is waiting, so start with true here
+	let mut signalled_waiting_false = true;
 	while !halted {
 		let polycube = submit_queue.pop();
 		if polycube.is_none() {
+			atomic_waiting.store(true, Ordering::Release);
+			signalled_waiting_false = false;
 			thread::sleep(Duration::from_millis(rng.gen_range(25..75)));
 			// check if we've been halted or if we are done
 			if atomic_halt.load(Ordering::Relaxed) || atomic_done.load(Ordering::Relaxed) {
 				halted = true;
-			//} else {
-			//	thread::sleep(Duration::from_millis(100));
 			}
 			continue;
+		}
+		// don't interact with the AtomicBool any more than we need to
+		if !signalled_waiting_false {
+			atomic_waiting.store(false, Ordering::Release);
+			signalled_waiting_false = true;
 		}
 		let mut polycube = polycube.unwrap();
 		// save a copy of the original polycube so we can
 		//   write it to disk if we are halted
 		let polycube_orig_clone = polycube.copy();
+		let mut final_polycube_encs: Vec<u128> = Vec::new();
 		match extend_as_worker(
 				&mut polycube,
 				n,
 				&submit_queue,
-				&response_queue,
 				&atomic_halt,
-				&mut rng) {
+				&mut rng,
+				save_final_polycubes,
+				&mut final_polycube_encs) {
 			Some(found_counts_by_n) => {
 				let mut all_n_counts: [usize; MAX_N] = [0; MAX_N];
 				for i in 1..n+1 {
@@ -980,7 +1005,11 @@ pub fn extend_as_worker_outer(n: u8, atomic_halt: Arc<AtomicBool>, atomic_done: 
 						None => {}
 					}
 				}
-				match response_queue.push(ThreadResponse{ job_complete: true, results: Some(all_n_counts), polycube: None }) {
+				match response_queue.push(ThreadResponse{
+						job_complete: true,
+						results: Some(all_n_counts),
+						orig_polycube: None,
+						final_polycube_encs: final_polycube_encs }) {
 					Ok(_) => {}
 					Err(_) => {
 						panic!("response_queue.push() failed");
@@ -990,7 +1019,11 @@ pub fn extend_as_worker_outer(n: u8, atomic_halt: Arc<AtomicBool>, atomic_done: 
 			None => {
 				// stopped due to the halt
 				halted = true;
-				match response_queue.push(ThreadResponse{ job_complete: false, results: None, polycube: Some(polycube_orig_clone) }) {
+				match response_queue.push(ThreadResponse{
+						job_complete: false,
+						results: None,
+						orig_polycube: Some(polycube_orig_clone),
+						final_polycube_encs: final_polycube_encs }) {
 					Ok(_) => {}
 					Err(_) => {
 						panic!("response_queue.push() failed");
@@ -1010,7 +1043,11 @@ pub fn extend_as_worker_outer(n: u8, atomic_halt: Arc<AtomicBool>, atomic_done: 
 			found_something = false;
 			continue;
 		}
-		match response_queue.push(ThreadResponse{ job_complete: false, results: None, polycube: polycube }) {
+		match response_queue.push(ThreadResponse{
+				job_complete: false,
+				results: None,
+				orig_polycube: polycube,
+				final_polycube_encs: Vec::new() }) {
 			Ok(_) => {}
 			Err(_) => {
 				panic!("response_queue.push() failed");
@@ -1176,8 +1213,11 @@ pub fn extend_and_delegate(polycube: &Polycube, limit_n: u8, delegate_at_n: u8,
 //   - we report counts to the results queue
 //   - we occasionally check for a halt signal
 pub fn extend_as_worker(polycube: &mut Polycube, limit_n: u8,
-		submit_queue: &Arc<ArrayQueue<Polycube>>, response_queue: &Arc<ArrayQueue<ThreadResponse>>,
-		atomic_halt: &Arc<AtomicBool>, rng: &mut ThreadRng) -> Option<[usize; 23]> {
+		submit_queue: &Arc<ArrayQueue<Polycube>>,
+		atomic_halt: &Arc<AtomicBool>,
+		rng: &mut ThreadRng,
+		save_final_polycubes: bool,
+		final_polycube_encs: &mut Vec<u128>) -> Option<[usize; 23]> {
 
 	let mut found_counts_by_n: [usize; 23] = [0; 23];
 
@@ -1187,6 +1227,9 @@ pub fn extend_as_worker(polycube: &mut Polycube, limit_n: u8,
 	//   which we need to stop at because we are doing
 	//   a depth-first recursive evaluation
 	if polycube.n == limit_n {
+		if save_final_polycubes {
+			final_polycube_encs.push(polycube.find_canonical_info(IMPOSSIBLE_POS).enc);
+		}
 		return Some(found_counts_by_n);
 	}
 
@@ -1246,7 +1289,8 @@ pub fn extend_as_worker(polycube: &mut Polycube, limit_n: u8,
 			if least_significant_cube_pos == try_pos {
 				found_counts_by_n[polycube.n as usize] += 1;
 				match extend_as_worker(polycube, limit_n,
-						submit_queue, response_queue, atomic_halt, rng) {
+						submit_queue, atomic_halt, rng,
+						save_final_polycubes, final_polycube_encs) {
 					Some(futher_counts) => {
 						for i in 1..limit_n+1 {
 							found_counts_by_n[i as usize] += futher_counts[i as usize];
@@ -1272,7 +1316,7 @@ pub fn extend_as_worker(polycube: &mut Polycube, limit_n: u8,
 					found_counts_by_n[polycube.n as usize] += 1;
 					// continue recursion
 					match extend_as_worker(polycube, limit_n,
-							submit_queue, response_queue, atomic_halt, rng) {
+							submit_queue, atomic_halt, rng, save_final_polycubes, final_polycube_encs) {
 						Some(futher_counts) => {
 							for i in 1..limit_n+1 {
 								found_counts_by_n[i as usize] += futher_counts[i as usize];
@@ -1459,6 +1503,7 @@ pub fn write_resume_file(n: u8, spawn_n: u8, polycubes_to_write_to_disk: Vec<Pol
 	gz.flush().unwrap();
 }
 
+// a "resume file" contains partial results from a halted run
 pub fn read_resume_file(resume_file_path: &PathBuf)
 		-> (u8, u8, BTreeMap<u8, usize>, f64, Vec<Vec<isize>>) {
 	let file_err_msg: String = format!("error reading resume file [{}]", resume_file_path.to_string_lossy());
@@ -1526,8 +1571,94 @@ pub fn read_resume_file(resume_file_path: &PathBuf)
 		}
 		line_num += 1;
 	}
-	println!("restored {} polycubes for submit queue", polycubes_read.len());
+	println!("read {} polycubes from resume file", polycubes_read.len());
 	return (n, spawn_n, n_counts, previous_total_elapsed_sec, polycubes_read);
+}
+
+// a polycubes file contains a list of polycube encodings
+//   where each line is a polycube encoding, except for
+//   the first line, which is n
+pub fn write_polycubes_file(
+		n: u8,
+		polycubes_file_path: &str,
+		polycubes_to_write_to_disk: &Vec<u128>) {
+	let polycubes_file_path: PathBuf = PathBuf::from(polycubes_file_path);
+	println!("\nwriting {} polycubes to [{}]...", polycubes_to_write_to_disk.len(), polycubes_file_path.to_str().unwrap());
+	let file_already_exists = polycubes_file_path.exists();
+	// append to the file if it already exists
+	let file_buf = if file_already_exists {
+		File::options().append(true).open(polycubes_file_path).unwrap()
+	// if we're creating a new file, write n as the first line
+	} else {
+		File::create(polycubes_file_path).unwrap()
+	};
+	let mut buf = BufWriter::new(file_buf);
+	// if creating a new file, write n as the first line
+	if !file_already_exists {
+		match buf.write(format!("{}\n", n).as_bytes()) {
+			Ok(_) => {}
+			Err(err) => {
+				println!("error writing to polycubes file:\n{}", err);
+				// if we have an error writing polycubes file, there's no
+				//   point in continuing
+				exit(1);
+			}
+		}
+	}
+	for polycube_enc in polycubes_to_write_to_disk {
+		match buf.write(format!("{}\n", polycube_enc).as_bytes()) {
+			Ok(_) => {}
+			Err(err) => {
+				println!("error writing to polycubes file:\n{}", err);
+				// if we have an error writing polycubes file, there's no
+				//   point in continuing
+				exit(1);
+			}
+		}
+	}
+	buf.flush().unwrap();
+}
+
+// a polycubes file contains a list of polycube encodings
+//   where each line is a polycube encoding, except for
+//   the first line, which is n
+pub fn read_polycubes_file(resume_file_path: &PathBuf)
+		-> (u8, Vec<u128>) {
+	let file_err_msg: String = format!("error reading resume file [{}]", resume_file_path.to_string_lossy());
+	let f = File::open(resume_file_path).expect(file_err_msg.as_str());
+	let file_extension = resume_file_path.extension().unwrap();
+	if file_extension != "gz" {
+		println!("unsupported resume file extension of [{:?}]", resume_file_path);
+		exit(1);
+	}
+	let mut buf = BufReader::new(GzDecoder::new(f));
+	let mut n: u8 = 0;
+	let mut polycubes_read: Vec<u128> = Vec::new();
+	let mut line: String = String::new();
+	let mut first_line = true;
+	let mut len: usize = 1;
+	while len > 0 {
+		line.clear();
+		len = buf.read_line(&mut line).expect(file_err_msg.as_str());
+		line = line.trim().to_string();
+		if line == "--end--" {
+			break;
+		}
+		if first_line {
+			n = line.parse().unwrap();
+			first_line = false;
+		} else if line.len() > 0 {
+			polycubes_read.push(match line.parse() {
+				Ok(enc) => enc,
+				Err(_) => {
+					println!("error: invalid polycube encoding [{}] in polycubes file", line);
+					exit(1);
+				}
+			});
+		}
+	}
+	println!("read {} polycubes from polycubes file", polycubes_read.len());
+	return (n, polycubes_read);
 }
 
 pub fn create_executable_sibling_file(filename: &str) -> PathBuf {
@@ -1554,13 +1685,28 @@ pub fn seconds_to_dur(s: f64) -> String {
 	return format!("{:0>2}h:{:0>2}m:{}s", hours, minutes, fsec);
 }
 
-pub fn validate_resume_file(resume_file: &str) -> Result<PathBuf, String> {
-    let resume_file_path = PathBuf::from(resume_file);
-    if !resume_file_path.is_file() {
-        return Err(format!("<resume-file> [{}] is not a regular file, does not exist, or does not have permissions \
-            necessary for access", resume_file));
-    }
-    Ok(resume_file_path)
+pub fn validate_polycubes_file_arg(file_arg: &str, arg_name: &str) -> Result<PathBuf, String> {
+	let file_path = PathBuf::from(file_arg);
+	match file_path.try_exists() {
+		Ok(_) => {}
+		Err(_) => {
+			return Err(format!("{} [{}] does not have permissions necessary for access", arg_name, file_arg));
+		}
+	}
+	if file_path.is_dir() {
+		return Err(format!("{} [{}] is not a regular file or does not have permissions \
+			necessary for access", arg_name, file_arg));
+	}
+	Ok(file_path)
+}
+
+pub fn validate_resume_file_arg(file_arg: &str, arg_name: &str) -> Result<PathBuf, String> {
+	let file_path = PathBuf::from(file_arg);
+	if !file_path.is_file() {
+		return Err(format!("{} [{}] is not a regular file, does not exist, or does not have permissions \
+			necessary for access", arg_name, file_arg));
+	}
+	Ok(file_path)
 }
 
 pub fn print_results(complete: bool, n: u8) {
@@ -1574,12 +1720,18 @@ pub fn print_results(complete: bool, n: u8) {
 
 fn main() {
 	let args: Vec<String> = env::args().collect();
-	let usage = format!("usage: {} [--n <n>] [--threads <threads>] [--spawn-n <spawn-n>] [--resume-from-file <resume-file>]\n\
+	let usage = format!("usage: {} \
+	[--n <n>] \
+	[--threads <threads>] \
+	[--spawn-n <spawn-n>] \
+	[--resume-from-file <resume-file>]\
+	[--write-found-polycubes-file <polycubes-file>]\n\
 	where:\n\
-	-  <n>          : the number of cubes the largest counted polycube should contain (>1)\n\
-	-  <threads>    : 0 for single-threaded, or >1 for the maximum number of threads to spawn simultaneously (default=0)\n\
-	-  <spawn-n>    : the smallest polycubes for which each will spawn a thread, higher->more shorter-lived threads (default=8)\n\
-	-  <resume-file>: a .txt.gz file previously created by this program",
+	-  <n>.............: the number of cubes the largest counted polycube should contain (>1)\n\
+	-  <threads>.......: 0 for single-threaded, or >1 for the maximum number of threads to spawn simultaneously (default=0)\n\
+	-  <spawn-n>.......: the smallest polycubes for which each will spawn a thread, higher->more shorter-lived threads (default=8)\n\
+	-  <resume-file>...: a .txt.gz file previously created by this program\n\
+	-  <polycubes-file>: a .txt.gz file previously created by this program\n",
 	args[0]);
 	if args.len() < 3 {
 		println!("{}", usage);
@@ -1587,10 +1739,12 @@ fn main() {
 	}
 
 	let mut cursor: usize = 1;
-	let mut arg_n: u8 = 0;
+	let mut arg_n: u8 = 255;
 	let mut arg_threads: u8 = 0;
 	let mut arg_spawn_n: u8 = 8;
 	let mut arg_resume_file: Option<PathBuf> = None;
+	let mut arg_polycubes_file: Option<String> = None;
+	let mut arg_polycubes_file_path: &str = "none";
 	// we want to start at the 1th index, and advance by 2
 	while cursor < args.len() - 1 {
 		if args[cursor] == "--help" || args[cursor] == "-h" {
@@ -1605,6 +1759,10 @@ fn main() {
 						exit(1);
 					} else if n > 21 {
 						println!("error: n greater than 21 not yet ;) supported");
+						println!("{}", usage);
+						exit(1);
+					} else if n <= arg_spawn_n {
+						println!("error: n must be greater than spawn-n");
 						println!("{}", usage);
 						exit(1);
 					}
@@ -1639,6 +1797,10 @@ fn main() {
 						println!("error: spawn-n must be greater than 3");
 						println!("{}", usage);
 						exit(1);
+					} else if spawn_n >= arg_n {
+						println!("error: spawn-n must be less than n");
+						println!("{}", usage);
+						exit(1);
 					}
 					spawn_n
 				}
@@ -1649,8 +1811,20 @@ fn main() {
 				}
 			};
 		} else if args[cursor] == "--resume-from-file" || args[cursor] == "-r" {
-			arg_resume_file = match validate_resume_file(&args[cursor + 1]) {
+			arg_resume_file = match validate_resume_file_arg(&args[cursor + 1], "<resume-file>") {
 				Ok(path) => Some(path),
+				Err(err) => {
+					println!("error: {}", err);
+					println!("{}", usage);
+					exit(1);
+				}
+			};
+		} else if args[cursor] == "--write-found-polycubes-file" || args[cursor] == "-w" {
+			arg_polycubes_file = match validate_polycubes_file_arg(&args[cursor + 1], "<polycubes-file>") {
+				Ok(_) => {
+					arg_polycubes_file_path = &args[cursor + 1];
+					Some(String::from(arg_polycubes_file_path))
+				}
 				Err(err) => {
 					println!("error: {}", err);
 					println!("{}", usage);
@@ -1725,14 +1899,15 @@ fn main() {
 			None => 0
 		};
 		println!("to halt early, create the file [{}]", halt_file_path.to_str().unwrap());
-		let mut polycubes_to_write_to_disk: Vec<Polycube> = Vec::new();
+		let mut polycubes_to_write_to_resume_file: Vec<Polycube> = Vec::new();
+		let mut polycubes_to_write_to_polycubes_file: Vec<u128> = Vec::new();
 
 		// these are the found canonical Polycubes of whatever
 		//   size that the child processes will evaluate
 		// we know that there will not be more Polycubes submitted
 		//   than the number of unique polycubes with n=<spawn-n>
 		let submit_queue: Arc<ArrayQueue<Polycube>> =
-			Arc::new(ArrayQueue::new(total_worker_jobs));
+			Arc::new(ArrayQueue::new(total_worker_jobs + 1000));
 		// the child processes will return both counts for fully-
 		//   evaluated Polycubes and also non-evaluated Polycubes
 		//   to write to disk for continuing later
@@ -1740,7 +1915,7 @@ fn main() {
 		//   polycubes submitted, so we can use the same bounding size
 		//   as submit_queue
 		let response_queue: Arc<ArrayQueue<ThreadResponse>> =
-			Arc::new(ArrayQueue::new(total_worker_jobs));
+			Arc::new(ArrayQueue::new(total_worker_jobs + 1000));
 
 
 		// bool for signalling that an early halt has been requested
@@ -1786,13 +1961,18 @@ fn main() {
 			}
 		};
 		let mut worker_handles: Vec<JoinHandle<()>> = Vec::new();
+		let mut worker_waiting_bools: Vec<Arc<AtomicBool>> = Vec::new();
+		let arg_write_polycubes_file: bool = arg_polycubes_file.is_some();
 		for _i in 0..initial_workers_to_spawn {
 			let ah = atomic_halt.clone();
 			let ad = atomic_done.clone();
+			let aw = Arc::new(AtomicBool::new(false));
+			let awc = aw.clone();
+			worker_waiting_bools.push(aw);
 			let sq = submit_queue.clone();
 			let rq = response_queue.clone();
 			let handle = thread::spawn(move || {
-				extend_as_worker_outer(arg_n, ah, ad, sq, rq);
+				extend_as_worker_outer(arg_n, ah, ad, awc, sq, rq, arg_write_polycubes_file);
 			});
 			worker_handles.push(handle);
 		}
@@ -1810,10 +1990,13 @@ fn main() {
 				compl_worker_jobs -= 1;
 				let ah = atomic_halt.clone();
 				let ad = atomic_done.clone();
+				let aw = Arc::new(AtomicBool::new(false));
+				let awc = aw.clone();
+				worker_waiting_bools.push(aw);
 				let sq = submit_queue.clone();
 				let rq = response_queue.clone();
 				let handle = thread::spawn(move || {
-					extend_as_worker_outer(arg_n, ah, ad, sq, rq);
+					extend_as_worker_outer(arg_n, ah, ad, awc, sq, rq, arg_write_polycubes_file);
 				});
 				worker_handles.push(handle);
 			}
@@ -1829,11 +2012,14 @@ fn main() {
 			// check if everything has completed
 			if !halted && (delegator_proc.is_none() || delegator_proc.as_ref().unwrap().is_finished())
 					&& submit_queue.is_empty() {
-				println!("\nlooks like we have finished!  stopping...");
-				// signal to the threads that they should stop
-				atomic_done.store(true, Ordering::Relaxed);
-				halted = true;
-				complete = true;
+				let all_workers_waiting = worker_waiting_bools.iter().all(|w| w.load(Ordering::Acquire));
+				if all_workers_waiting {
+					println!("\nlooks like we have finished!  stopping...");
+					// signal to the threads that they should stop
+					atomic_done.store(true, Ordering::Relaxed);
+					halted = true;
+					complete = true;
+				}
 			}
 
 			// regardless of halt file, continue to process responses
@@ -1891,11 +2077,20 @@ fn main() {
 						}
 					}
 					last_count_increment_time = Some(Instant::now());
+					if response.final_polycube_encs.len() > 0 {
+						polycubes_to_write_to_polycubes_file.extend(response.final_polycube_encs);
+						if polycubes_to_write_to_polycubes_file.len() >= 1000 {
+							write_polycubes_file(arg_n, arg_polycubes_file_path, &mut polycubes_to_write_to_polycubes_file);
+							polycubes_to_write_to_polycubes_file.clear();
+						}
+					} else if arg_write_polycubes_file {
+						println!("\nresponse without any final polycubes!");
+					}
 				} else {
-					match response.polycube {
+					match response.orig_polycube {
 						// we have a non-evaluated polycube, so we can write it to disk
 						Some(polycube) => {
-							polycubes_to_write_to_disk.push(polycube);
+							polycubes_to_write_to_resume_file.push(polycube);
 							saved_worker_jobs += 1;
 						}
 						None => {
@@ -1913,13 +2108,16 @@ fn main() {
 		}
 		println!("\nall threads have completed: compl_worker_jobs={}, saved_worker_jobs={} (compl+saved={}, where @n={} should be total_worker_jobs={})",
 			compl_worker_jobs, saved_worker_jobs, compl_worker_jobs + saved_worker_jobs as isize, arg_spawn_n, total_worker_jobs);
-		if polycubes_to_write_to_disk.len() > 0 {
+		if polycubes_to_write_to_resume_file.len() > 0 {
 			write_resume_file(
 				arg_n,
 				arg_spawn_n,
-				polycubes_to_write_to_disk,
+				polycubes_to_write_to_resume_file,
 				previous_total_elapsed_sec + (last_count_increment_time.unwrap().duration_since(start_time).as_secs_f64()),
 			)
+		}
+		if polycubes_to_write_to_polycubes_file.len() > 0 {
+			write_polycubes_file(arg_n, arg_polycubes_file_path, &mut polycubes_to_write_to_polycubes_file);
 		}
 	}
 	if last_count_increment_time.is_none() {
