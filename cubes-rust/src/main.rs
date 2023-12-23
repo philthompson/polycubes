@@ -1,9 +1,9 @@
 
 use chrono::prelude::*;
 use crossbeam_queue::ArrayQueue;
-use flate2::Compression;
+//use flate2::Compression;
 use flate2::read::GzDecoder;
-use flate2::write::GzEncoder;
+//use flate2::write::GzEncoder;
 use rand::prelude::*;
 use std::collections::BTreeSet;
 use std::collections::BTreeMap;
@@ -11,6 +11,7 @@ use std::env;
 use std::fs::File;
 use std::io::BufRead;
 use std::io::BufReader;
+use std::io::BufWriter;
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::exit;
@@ -19,7 +20,6 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::thread;
 use std::thread::JoinHandle;
-//use std::thread::Thread;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -1391,10 +1391,10 @@ pub fn extend_single_thread(polycube: &mut Polycube, limit_n: u8, depth: usize) 
 
 pub fn write_resume_file(n: u8, spawn_n: u8, polycubes_to_write_to_disk: Vec<Polycube>, elapsed_sec: f64) {
 	let timestamp = Local::now().to_rfc3339().replace('-', "").replace(':', "");
-	let filename = format!("halt-n{}-{}.txt.gz", n, &timestamp[0..15]);
+	let filename = format!("halt-n{}-{}.txt", n, &timestamp[0..15]);
 	let resume_file_path = create_executable_sibling_file(filename.as_str());
 	println!("writing {} polycubes to [{}]...", polycubes_to_write_to_disk.len(), resume_file_path.to_str().unwrap());
-	let mut file_buf = File::create(resume_file_path).unwrap();
+	let file_buf = File::create(resume_file_path).unwrap();
 	// i am getting strange repeated/missing characters in the .gz file,
 	//   so i am trying a lower compression level
 	//let mut gz = GzEncoder::new(&mut file_buf, Compression::best());
@@ -1402,7 +1402,9 @@ pub fn write_resume_file(n: u8, spawn_n: u8, polycubes_to_write_to_disk: Vec<Pol
 	//let mut gz = GzEncoder::new(&mut file_buf, Compression::default());
 	// still getting errors at the fast compression level
 	//let mut gz = GzEncoder::new(&mut file_buf, Compression::fast());
-	let mut gz = GzEncoder::new(&mut file_buf, Compression::none());
+	// this works, but there's no point in creating a .gz file without compression
+	//let mut gz = GzEncoder::new(&mut file_buf, Compression::none());
+	let mut gz = BufWriter::new(file_buf);
 	match gz.write(format!("{}\n{}\n{}\n", n, spawn_n, elapsed_sec).as_bytes()) {
 		Ok(_) => {}
 		Err(err) => {
@@ -1461,7 +1463,17 @@ pub fn read_resume_file(resume_file_path: &PathBuf)
 		-> (u8, u8, BTreeMap<u8, usize>, f64, Vec<Vec<isize>>) {
 	let file_err_msg: String = format!("error reading resume file [{}]", resume_file_path.to_string_lossy());
 	let f = File::open(resume_file_path).expect(file_err_msg.as_str());
+	let file_extension = resume_file_path.extension().unwrap();
+	if file_extension != "gz" /*&& file_extension != "txt" */ {
+		println!("unsupported resume file extension of [{:?}]", resume_file_path);
+		exit(1);
+	}
 	let mut buf = BufReader::new(GzDecoder::new(f));
+	//if file_extension == "gz" {
+	//	BufReader::new(GzDecoder::new(f))
+	//} else  {
+	//	BufReader::new(f)
+	//};
 	let mut n: u8 = 0;
 	let mut spawn_n: u8 = 0;
 	let mut previous_total_elapsed_sec: f64 = 0.0;
