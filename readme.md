@@ -127,7 +127,7 @@ Running times (in seconds) for `--threads 0 -n 11` on an M1 Mac mini:
 |   39.7 |    22.8 | 227f596 | short circuit P+A-B=P encoding check |
 |   39.5 |    22.8 | 484a37f | re-use P+A encoding after testing P+A-B |
 |   38.2 |    22.7 | b3788b8 | skip A cubes already in P |
-|        |    18.7 |         | short circuit P+A encoding check |
+|        |    18.7 | ef1718a | short circuit P+A encoding check |
 
 Running times (in seconds) for `--threads 7 --spawn-n 7 -n 11` on an M1 Mac mini:
 | x86_64 | aarch64 |  commit | note  |
@@ -143,7 +143,7 @@ Running times (in seconds) for `--threads 7 --spawn-n 7 -n 11` on an M1 Mac mini
 |    9.3 |     5.2 | 227f596 | short circuit P+A-B=P encoding check |
 |    9.3 |     5.2 | 484a37f | re-use P+A encoding after testing P+A-B |
 |    8.3 |     5.1 | b3788b8 | skip A cubes already in P |
-|        |     5.2 |         | short circuit P+A encoding check |
+|        |     5.2 | ef1718a | short circuit P+A encoding check |
 
 Running times (in seconds) for `--threads 7 --spawn-n 8 -n 12` on an M1 Mac mini:
 | x86_64 | aarch64 |  commit | note  |
@@ -156,4 +156,4 @@ Running times (in seconds) for `--threads 7 --spawn-n 8 -n 12` on an M1 Mac mini
 |   78.3 |    48.2 | 227f596 | short circuit P+A-B=P encoding check |
 |   78.3 |    48.2 | 484a37f | re-use P+A encoding after testing P+A-B |
 |   78.3 |    48.2 | b3788b8 | skip A cubes already in P |
-|        |    39.1 |         | short circuit P+A encoding check |
+|        |    39.1 | ef1718a | short circuit P+A encoding check |
