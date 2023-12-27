@@ -897,13 +897,17 @@ impl Polycube {
 
 	// return our canonical info, calculating it first if necessary
 	pub fn find_canonical_info(&mut self, look_for_pos_as_least_significant: isize) -> &CanonicalInfo {
+		return self.find_canonical_info_with_target(look_for_pos_as_least_significant, 0);
+	}
+
+	pub fn find_canonical_info_with_target(&mut self, look_for_pos_as_least_significant: isize, target_encoding: u128) -> &CanonicalInfo {
 		if self.canonical_info.is_none() {
 			let mut canonical = CanonicalInfo {
 				enc: 0,
 				least_significant_cube_pos: IMPOSSIBLE_POS,
 				max_cube_value: self.find_maximum_cube_value()
 			};
-			let mut best_encoding: u128 = 0;
+			let mut best_encoding: u128 = target_encoding;
 			let mut encoding_diff: u128;
 			for (cube_pos, cube_info) in self.cube_info_by_pos.iter() {
 				let cube_enc = cube_info[6].unwrap() as usize;
@@ -1173,6 +1177,7 @@ pub fn extend_and_delegate(polycube: &Polycube, limit_n: u8, delegate_at_n: u8,
 
 	let mut tmp_add = polycube.copy();
 	let canonical_orig_enc: u128 = tmp_add.find_canonical_info(IMPOSSIBLE_POS).enc;
+	let canonical_orig_enc_shifted = canonical_orig_enc << 6;
 
 	let mut try_pos: isize;
 
@@ -1203,7 +1208,7 @@ pub fn extend_and_delegate(polycube: &Polycube, limit_n: u8, delegate_at_n: u8,
 
 			// skip if we've already seen some P+A with the same canonical representation
 			//   (comparing the bitwise int only)
-			canonical_try = tmp_add.find_canonical_info(try_pos);
+			canonical_try = tmp_add.find_canonical_info_with_target(try_pos, canonical_orig_enc_shifted);
 			if !tried_canonicals.insert(canonical_try.enc) {
 				tmp_add.remove(try_pos);
 				continue;
@@ -1323,6 +1328,7 @@ pub fn extend_as_worker(polycube: &mut Polycube, limit_n: u8,
 	let mut tried_canonicals: BTreeSet<u128> = BTreeSet::new();
 
 	let canonical_orig_enc: u128 = polycube.find_canonical_info(IMPOSSIBLE_POS).enc;
+	let canonical_orig_enc_shifted = canonical_orig_enc << 6;
 	let mut canonical_try: &CanonicalInfo;
 	let mut canonical_try_clone: CanonicalInfo;
 	let mut least_significant_cube_pos: isize;
@@ -1361,7 +1367,7 @@ pub fn extend_as_worker(polycube: &mut Polycube, limit_n: u8,
 
 			// skip if we've already seen some p+1 with the same canonical representation
 			//   (comparing the bitwise int only)
-			canonical_try = polycube.find_canonical_info(try_pos);
+			canonical_try = polycube.find_canonical_info_with_target(try_pos, canonical_orig_enc_shifted);
 			if !tried_canonicals.insert(canonical_try.enc) {
 				polycube.remove(try_pos);
 				continue;
@@ -1448,6 +1454,7 @@ pub fn extend_single_thread(polycube: &mut Polycube, limit_n: u8, depth: usize) 
 	let mut tried_canonicals: BTreeSet<u128> = BTreeSet::new();
 
 	let canonical_orig_enc: u128 = polycube.find_canonical_info(IMPOSSIBLE_POS).enc;
+	let canonical_orig_enc_shifted = canonical_orig_enc << 6;
 	let mut canonical_try: &CanonicalInfo;
 	let mut canonical_try_clone: CanonicalInfo;
 	let mut least_significant_cube_pos: isize;
@@ -1477,7 +1484,7 @@ pub fn extend_single_thread(polycube: &mut Polycube, limit_n: u8, depth: usize) 
 
 			// skip if we've already seen some P+A with the same canonical representation
 			//   (comparing the bitwise int only)
-			canonical_try = polycube.find_canonical_info(try_pos);
+			canonical_try = polycube.find_canonical_info_with_target(try_pos, canonical_orig_enc_shifted);
 			if !tried_canonicals.insert(canonical_try.enc) {
 				polycube.remove(try_pos);
 				continue;
@@ -1846,18 +1853,18 @@ fn main() {
 			arg_n = match args[cursor + 1].parse() {
 				Ok(n) => {
 					if n < 2 {
-						println!("error: n must be greater than 1");
+						println!("error: <n> must be greater than 1");
 						println!("{}", usage);
 						exit(1);
 					} else if n > 21 {
-						println!("error: n greater than 21 not yet ;) supported");
+						println!("error: <n> greater than 21 not yet ;) supported");
 						println!("{}", usage);
 						exit(1);
 					}
 					n
 				}
 				Err(_) => {
-					println!("error: invalid value for n");
+					println!("error: invalid value for <n>");
 					println!("{}", usage);
 					exit(1);
 				}
@@ -1866,14 +1873,14 @@ fn main() {
 			arg_threads = match args[cursor + 1].parse() {
 				Ok(threads) => {
 					if threads == 1 {
-						println!("error: threads must be 0 or greater than 1");
+						println!("error: <threads> must be 0 or greater than 1");
 						println!("{}", usage);
 						exit(1);
 					}
 					threads
 				}
 				Err(_) => {
-					println!("error: invalid value for threads");
+					println!("error: invalid value for <threads>");
 					println!("{}", usage);
 					exit(1);
 				}
@@ -1882,14 +1889,14 @@ fn main() {
 			arg_spawn_n = match args[cursor + 1].parse() {
 				Ok(spawn_n) => {
 					if spawn_n < 4 {
-						println!("error: spawn-n must be greater than 3");
+						println!("error: <spawn-n> must be greater than 3");
 						println!("{}", usage);
 						exit(1);
 					}
 					spawn_n
 				}
 				Err(_) => {
-					println!("error: invalid value for spawn-n");
+					println!("error: invalid value for <spawn-n>");
 					println!("{}", usage);
 					exit(1);
 				}
@@ -1939,14 +1946,14 @@ fn main() {
 			exit(1);
 		}
 		if arg_spawn_n >= arg_n {
-			println!("error: spawn-n must be less than n");
+			println!("error: <spawn-n> must be less than <n>");
 			println!("{}", usage);
 			exit(1);
 		}
 	}
 	if arg_n > 0 {
-		if arg_spawn_n < 1 && arg_resume_file.is_none() && arg_begin_file.is_none() {
-			println!("error: spawn-n must be greater than 0");
+		if arg_threads > 0 && arg_spawn_n < 1 && arg_resume_file.is_none() && arg_begin_file.is_none() {
+			println!("error: <spawn-n> must be greater than 0 when <threads> is greater than 0");
 			println!("{}", usage);
 			exit(1);
 		}
