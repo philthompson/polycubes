@@ -1,4 +1,10 @@
 
+## Note
+
+This polycube enumerator is slower than other known solutions, including Stanley Dodds's algorithm which I've ported to rust in my other repo: https://github.com/philthompson/polycubes-dodds
+
+The presseyt algorithm, and others, are discussed here: https://github.com/mikepound/opencubes
+
 ## Polycubes
 
 Python and Rust implementations of a hashtable-less polycube enumerator using the method described by presseyt (see link below).  Both implementations can run on multiple CPU cores and can be halted and resumed.
@@ -126,8 +132,9 @@ Running times (in seconds) for `--threads 0 -n 11` on an M1 Mac mini:
 |   46.5 |    26.8 | e11a43f | remove needless rotation cast |
 |   39.7 |    22.8 | 227f596 | short circuit P+A-B=P encoding check |
 |   39.5 |    22.8 | 484a37f | re-use P+A encoding after testing P+A-B |
-|   38.2 |    22.7 | b3788b8 | skip A cubes already in P |
+|   38.2 |    22.7 | b3788b8 | skip A cubes already in P (reverted) |
 |        |    18.7 | ef1718a | short circuit P+A encoding check |
+|        |    18.6 |         | reverted: skip A cubes already in P |
 
 Running times (in seconds) for `--threads 7 --spawn-n 7 -n 11` on an M1 Mac mini:
 | x86_64 | aarch64 |  commit | note  |
@@ -142,7 +149,7 @@ Running times (in seconds) for `--threads 7 --spawn-n 7 -n 11` on an M1 Mac mini
 |   10.4 |     6.2 | e11a43f | remove needless rotation cast |
 |    9.3 |     5.2 | 227f596 | short circuit P+A-B=P encoding check |
 |    9.3 |     5.2 | 484a37f | re-use P+A encoding after testing P+A-B |
-|    8.3 |     5.1 | b3788b8 | skip A cubes already in P |
+|    8.3 |     5.1 | b3788b8 | skip A cubes already in P (reverted) |
 |        |     5.2 | ef1718a | short circuit P+A encoding check |
 
 Running times (in seconds) for `--threads 7 --spawn-n 8 -n 12` on an M1 Mac mini:
@@ -155,5 +162,5 @@ Running times (in seconds) for `--threads 7 --spawn-n 8 -n 12` on an M1 Mac mini
 |   95.3 |    58.2 | e11a43f | remove needless rotation cast |
 |   78.3 |    48.2 | 227f596 | short circuit P+A-B=P encoding check |
 |   78.3 |    48.2 | 484a37f | re-use P+A encoding after testing P+A-B |
-|   78.3 |    48.2 | b3788b8 | skip A cubes already in P |
+|   78.3 |    48.2 | b3788b8 | skip A cubes already in P (reverted) |
 |        |    39.1 | ef1718a | short circuit P+A encoding check |

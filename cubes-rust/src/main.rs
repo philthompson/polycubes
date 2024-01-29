@@ -189,7 +189,29 @@ const MAXIMUM_CUBE_ROTATION_INDICES: [&[u8]; 64] = [
 //   which is kind of funny to put in a program that
 //   calculates these values -- but these are needed to
 //   help calculate estimated time remaining
-const WELL_KNOWN_N_COUNTS: [usize; 17] = [0, 1, 1, 2, 8, 29, 166, 1023, 6922, 48311, 346543, 2522522, 18598427, 138462649, 1039496297, 7859514470, 59795121480];
+const WELL_KNOWN_N_COUNTS: [usize; 23] = [0,
+	/* n=1  */                      1,
+	/* n=2  */                      1,
+	/* n=3  */                      2,
+	/* n=4  */                      8,
+	/* n=5  */                     29,
+	/* n=6  */                    166,
+	/* n=7  */                  1_023,
+	/* n=8  */                  6_922,
+	/* n=9  */                 48_311,
+	/* n=10 */                346_543,
+	/* n=11 */              2_522_522,
+	/* n=12 */             18_598_427,
+	/* n=13 */            138_462_649,
+	/* n=14 */          1_039_496_297,
+	/* n=15 */          7_859_514_470,
+	/* n=16 */         59_795_121_480,
+	/* n=17 */        457_409_613_979,
+	/* n=18 */      3_516_009_200_564,
+	/* n=19 */     27_144_143_923_583,
+	/* n=20 */    210_375_361_379_518,
+	/* n=21 */  1_636_128_187_400_680,  /* estimate */
+	/* n=22 */ 12_763_055_320_276_300  /* estimate */];
 
 // store counts for 0 cubes, 1 cube, 2 cubes, etc, up to MAX_N-1
 const MAX_N: usize = 22+1;
@@ -1194,10 +1216,7 @@ pub fn extend_and_delegate(polycube: &Polycube, limit_n: u8, delegate_at_n: u8,
 	for cube_pos in polycube.cube_info_by_pos.keys() {
 		for direction_cost in DIRECTION_COSTS {
 			try_pos = cube_pos + direction_cost;
-			// skip if P already contains A
-			if polycube.cube_info_by_pos.contains_key(&try_pos) {
-				continue;
-			}
+
 			// skip if we've already tried this position
 			if !tried_pos.insert(try_pos) {
 				continue;
@@ -1353,10 +1372,7 @@ pub fn extend_as_worker(polycube: &mut Polycube, limit_n: u8,
 	for cube_pos in original_positions {
 		for direction_cost in DIRECTION_COSTS {
 			try_pos = cube_pos + direction_cost;
-			// skip if P already contains A
-			if polycube.cube_info_by_pos.contains_key(&try_pos) {
-				continue;
-			}
+
 			// skip if we've already tried this position
 			if !tried_pos.insert(try_pos) {
 				continue;
@@ -1470,10 +1486,7 @@ pub fn extend_single_thread(polycube: &mut Polycube, limit_n: u8, depth: usize) 
 	for cube_pos in original_positions {
 		for direction_cost in DIRECTION_COSTS {
 			try_pos = cube_pos + direction_cost;
-			// skip if P already contains A
-			if polycube.cube_info_by_pos.contains_key(&try_pos) {
-				continue;
-			}
+
 			// skip if we've already tried this position
 			if !tried_pos.insert(try_pos) {
 				continue;
